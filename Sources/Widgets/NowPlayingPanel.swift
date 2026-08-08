@@ -2,6 +2,7 @@ import SwiftUI
 
 struct NowPlayingPanel: View {
     @ObservedObject var coordinator: IslandCoordinator
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Definite width for the text column. The island is a fixed size, so a `.infinity` chain
     /// wrapped around a `GeometryReader` leaves the layout unresolved and the window never
     /// composites — AppKit reports it visible while the window server holds a 0x0 surface.
@@ -26,14 +27,24 @@ struct NowPlayingPanel: View {
 
                 // `liveElapsed` reads the clock, but nothing publishes between helper events, so
                 // the body never re-ran and the bar sat frozen until the track changed. Tick just
-                // this subtree — repainting the whole island at 2 Hz is what `levelStore` exists
-                // to avoid — and let the schedule idle while paused.
-                TimelineView(.animation(minimumInterval: 0.5, paused: !media.isPlaying)) { _ in
+                // this subtree: 60 Hz drives the wave while playing, Reduce Motion returns to 2 Hz,
+                // and the schedule idles while paused.
+                TimelineView(.animation(
+                    minimumInterval: reduceMotion ? 0.5 : 1.0 / 60.0,
+                    paused: !media.isPlaying
+                )) { timeline in
                     Scrubber(
                         progress: media.progress,
                         elapsed: media.liveElapsed,
                         duration: media.duration,
-                        tint: media.accent
+                        tint: media.accent,
+                        isPlaying: media.isPlaying,
+                        wavePhase: reduceMotion ? 0 : CGFloat(
+                            timeline.date.timeIntervalSinceReferenceDate
+                                .truncatingRemainder(
+                                    dividingBy: Double(ScrubberBar.wavelength / ScrubberBar.waveSpeed)
+                                )
+                        ) * ScrubberBar.waveSpeed
                     ) { fraction in
                         coordinator.mediaSeek?(fraction * media.duration)
                     }
@@ -57,6 +68,8 @@ struct Scrubber: View {
     let elapsed: Double
     let duration: Double
     var tint: Color = .white
+    let isPlaying: Bool
+    let wavePhase: CGFloat
     var onSeek: (Double) -> Void
 
     @State private var dragFraction: Double?
@@ -68,7 +81,14 @@ struct Scrubber: View {
     var body: some View {
         VStack(spacing: 3) {
             GeometryReader { geo in
-                ScrubberBar(width: geo.size.width, fraction: shown, tint: tint, active: active)
+                ScrubberBar(
+                    width: geo.size.width,
+                    fraction: shown,
+                    tint: tint,
+                    active: active,
+                    waving: isPlaying && dragFraction == nil,
+                    wavePhase: wavePhase
+                )
                     // A 3pt bar is impossible to grab; the gesture gets a taller invisible target.
                     .contentShape(Rectangle().inset(by: -7))
                     .gesture(
@@ -124,20 +144,73 @@ struct ScrubberBar: View {
     let fraction: Double
     let tint: Color
     let active: Bool
+    var waving = false
+    var wavePhase: CGFloat = 0
 
     /// Alcove's resting bar: 3pt, measured off the shipping app at 2x (6 device pixels).
     static let restHeight: CGFloat = 3
     static let activeHeight: CGFloat = 5
+    static let waveHeight: CGFloat = 9
+    static let waveAmplitude: CGFloat = 2
+    static let wavelength: CGFloat = 10
+    static let waveSpeed: CGFloat = 7
 
     var body: some View {
         ZStack(alignment: .leading) {
-            Capsule().fill(.white.opacity(0.16))
             Capsule()
-                .fill(tint)
-                .frame(width: max(0, width * fraction))
+                .fill(.white.opacity(0.16))
+                .frame(height: active ? Self.activeHeight : Self.restHeight)
+            SquigglyProgressShape(
+                amplitude: waving ? Self.waveAmplitude : 0,
+                wavelength: Self.wavelength,
+                phase: wavePhase
+            )
+            .stroke(
+                tint,
+                style: StrokeStyle(
+                    lineWidth: active ? Self.activeHeight : Self.restHeight,
+                    lineCap: .round,
+                    lineJoin: .round
+                )
+            )
+            .frame(width: max(0, width * min(max(fraction, 0), 1)), height: Self.waveHeight)
+            .animation(.easeOut(duration: 0.18), value: waving)
         }
-        .frame(height: active ? Self.activeHeight : Self.restHeight)
+        .frame(height: Self.waveHeight)
         .frame(height: Self.restHeight)
+    }
+}
+
+struct SquigglyProgressShape: Shape {
+    var amplitude: CGFloat
+    let wavelength: CGFloat
+    let phase: CGFloat
+
+    var animatableData: CGFloat {
+        get { amplitude }
+        set { amplitude = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        guard rect.width > 0 else { return path }
+
+        let wavelength = max(wavelength, 1)
+        let step = max(0.5, wavelength / 20)
+        func point(at x: CGFloat) -> CGPoint {
+            let angle = ((x - rect.minX + phase) / wavelength) * 2 * .pi
+            let variation = 0.72 + 0.28 * sin(angle * 0.37 + 1.1)
+            return CGPoint(x: x, y: rect.midY + amplitude * variation * sin(angle))
+        }
+
+        path.move(to: point(at: rect.minX))
+        var x = rect.minX + step
+        while x < rect.maxX {
+            path.addLine(to: point(at: x))
+            x += step
+        }
+        path.addLine(to: point(at: rect.maxX))
+        return path
     }
 }
 

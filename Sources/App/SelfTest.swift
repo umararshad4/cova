@@ -235,6 +235,22 @@ func runSelfTests() {
     assert(barHeight(active: true) == barHeight(active: false),
            "hover thickening must overflow, not reflow: \(barHeight(active: true)) vs \(barHeight(active: false))")
 
+    // --- Scrubber wave: zero amplitude is straight; motion stays inside its drawing slot ---
+    let waveRect = CGRect(x: 0, y: 0, width: 150, height: ScrubberBar.waveHeight)
+    let flatWave = SquigglyProgressShape(amplitude: 0, wavelength: ScrubberBar.wavelength, phase: 0)
+        .path(in: waveRect).boundingRect
+    assert(flatWave.height < 0.01, "zero-amplitude progress must be straight: \(flatWave)")
+    let wave = SquigglyProgressShape(
+        amplitude: ScrubberBar.waveAmplitude,
+        wavelength: ScrubberBar.wavelength,
+        phase: 0
+    )
+        .path(in: waveRect).boundingRect
+    assert(wave.height > ScrubberBar.waveAmplitude * 1.9,
+           "playing progress must visibly wave: \(wave)")
+    assert(wave.minY >= waveRect.minY && wave.maxY <= waveRect.maxY,
+           "progress wave must stay inside its drawing slot: \(wave)")
+
     // --- Sounds: every cue must render, or the app crashes on a keypress ---
     assert(SoundService.allCuesResolve(), "every SoundCue must produce a buffer")
 
