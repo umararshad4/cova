@@ -5,6 +5,13 @@ Every version here has a matching GitHub release with a `Tyland.dmg` attached.
 
 <!-- next -->
 
+## v0.2.1 — 2026-08-08
+
+### Fixes
+
+- publish the generated DMG (1d07315)
+
+
 ## v0.2.0 — 2026-08-08
 
 ### Features
