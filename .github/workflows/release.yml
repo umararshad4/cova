@@ -1,0 +1,115 @@
+name: Release
+
+# Cuts a version, builds the app, and attaches the DMG to a GitHub release — but only when the
+# commits since the last tag actually contain something worth releasing. A push of nothing but
+# docs/chore/ci commits is a no-op, so main stays pushable without minting dead versions.
+#
+# Nothing attacker-controlled (commit messages, refs) is ever interpolated into a `run:` block —
+# messages only ever reach the shell through `git log`, where they stay data.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the changelog is built from history, so a shallow clone won't do
+
+      # Logic lives in the script so it can be run and tested outside CI:
+      #   ./scripts/next-version.sh --self-check
+      - name: Work out the next version
+        id: version
+        env:
+          EVENT: ${{ github.event_name }}
+        run: ./scripts/next-version.sh >> "$GITHUB_OUTPUT"
+
+      - name: Stamp the version into the bundle
+        if: steps.version.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Resources/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" Resources/Info.plist
+
+      # Before the tag is pushed, so a broken build leaves no dangling version behind.
+      - name: Build and package
+        if: steps.version.outputs.release == 'true'
+        run: ./package.sh
+
+      - name: Write the changelog entry
+        if: steps.version.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          RANGE: ${{ steps.version.outputs.range }}
+        run: |
+          set -euo pipefail
+
+          # Strips the `feat(scope): ` prefix — the heading already says what kind of change it is.
+          section() {
+            local body
+            body=$(git log --no-merges -E --grep="$1" --pretty='- %s (%h)' "$RANGE" \
+                   | sed -E 's/^- [a-z]+(\([^)]*\))?!?: /- /') || true
+            if [ -n "$body" ]; then
+              printf '### %s\n\n%s\n\n' "$2" "$body"
+            fi
+          }
+
+          {
+            printf '## v%s — %s\n\n' "$VERSION" "$(date -u +%Y-%m-%d)"
+            section '^[a-z]+(\([^)]*\))?!:'    'Breaking'
+            section '^feat(\([^)]*\))?:'       'Features'
+            section '^(fix|perf)(\([^)]*\))?:' 'Fixes'
+          } > notes.md
+
+          cat notes.md
+
+          # Newest first, spliced in at the marker so the header can grow without breaking this.
+          {
+            sed '/<!-- next -->/q' CHANGELOG.md
+            printf '\n'
+            cat notes.md
+            sed '1,/<!-- next -->/d' CHANGELOG.md
+          } > CHANGELOG.new
+          mv CHANGELOG.new CHANGELOG.md
+
+      - name: Commit, tag and push
+        if: steps.version.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md Resources/Info.plist
+          git commit -m "chore(release): v$VERSION"
+          # Annotated, not lightweight: `--follow-tags` below silently skips lightweight tags.
+          git tag -a "v$VERSION" -m "v$VERSION"
+          # Pushes made with GITHUB_TOKEN don't retrigger workflows, so this can't loop.
+          git push origin HEAD:main --follow-tags
+
+      - name: Publish the release
+        if: steps.version.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # package.sh skips the DMG if hdiutil misbehaves, so upload whatever it actually produced.
+          assets=()
+          [ -f build/Tyland.dmg ] && assets+=(build/Tyland.dmg)
+          [ -f build/Tyland.zip ] && assets+=(build/Tyland.zip)
+          [ ${#assets[@]} -gt 0 ] || { echo "package.sh produced no artefacts" >&2; exit 1; }
+          gh release create "v$VERSION" --title "v$VERSION" --notes-file notes.md "${assets[@]}"
