@@ -142,7 +142,7 @@ final class NotchPanel: NSPanel {
         // about to expand — hover, tap-to-toggle and a hover *delay* all route through here. Growing
         // on hover instead stranded the window at expanded size whenever the delay was cancelled or
         // `expandOnHover` was off, because nothing published and nothing shrank it back.
-        coordinator.onWillExpand = { [weak self] in self?.growForExpansion() }
+        coordinator.onExpand = { [weak self] in self?.growForExpansion() }
 
         applyFrame(for: windowSize(), animated: false)
         orderFrontRegardless()
@@ -194,7 +194,9 @@ final class NotchPanel: NSPanel {
         guard target.width > frame.width || target.height > frame.height else { return }
         shrink?.cancel()
         shrink = nil
-        applyFrame(for: target, animated: false)
+        // Let the window resize and expanded SwiftUI geometry reach the compositor together;
+        // displaying the resized backing surface first reads as a hitch on hover.
+        applyFrame(for: target, animated: false, display: false)
     }
 
     private func syncSize() {
@@ -219,7 +221,7 @@ final class NotchPanel: NSPanel {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: work)
     }
 
-    private func applyFrame(for size: CGSize, animated: Bool) {
+    private func applyFrame(for size: CGSize, animated: Bool, display: Bool = true) {
         let geometry = coordinator.geometry
         setFrame(
             CGRect(
@@ -228,7 +230,7 @@ final class NotchPanel: NSPanel {
                 width: size.width,
                 height: size.height
             ),
-            display: true,
+            display: display,
             animate: animated
         )
     }

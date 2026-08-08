@@ -90,17 +90,16 @@ final class IslandCoordinator: ObservableObject {
 
     private var hoverTask: Task<Void, Never>?
 
-    /// Called synchronously *just before* `isExpanded` turns true, so the panel can grow its window
-    /// before SwiftUI draws the first expanded frame. Reacting via `objectWillChange` instead is a
-    /// runloop tick late: that frame lands in a still-collapsed window, which clips the island's
-    /// bottom corners flat until the window catches up and they snap round.
-    var onWillExpand: (() -> Void)?
+    /// Called synchronously after expanded geometry becomes current, but before SwiftUI draws it.
+    /// Growing while the resting geometry is still current briefly lays the smaller island out in
+    /// the larger window, which makes hover expansion appear to shrink and reposition first.
+    var onExpand: (() -> Void)?
 
-    /// Every path into `isExpanded` goes through here, so no caller can skip the pre-grow.
+    /// Every path into `isExpanded` goes through here, so panel growth stays in the same update.
     private func setExpanded(_ value: Bool) {
         guard value != isExpanded else { return }
-        if value { onWillExpand?() }
         isExpanded = value
+        if value { onExpand?() }
     }
 
     func hover(_ inside: Bool) {

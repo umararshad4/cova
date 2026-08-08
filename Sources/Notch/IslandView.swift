@@ -3,19 +3,22 @@ import SwiftUI
 struct IslandView: View {
     @ObservedObject var coordinator: IslandCoordinator
 
-    /// Tuned against this machine's 60 Hz panel. Re-check on a 120 Hz ProMotion display.
-    private var spring: Animation { .interpolatingSpring(stiffness: 300, damping: 24) }
+    private var expansionAnimation: Animation { .easeInOut(duration: 0.25) }
 
     var body: some View {
         let size = coordinator.currentSize
 
-        island(size: size)
-            // Hover comes from the panel's tracking area, not `.onHover` — SwiftUI reports a
-            // spurious exit whenever the hosting view resizes, and the window now resizes on hover.
-            .contentShape(Rectangle())
-            .onTapGesture { coordinator.toggle() }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .animation(spring, value: coordinator.layoutToken)
+        GeometryReader { proxy in
+            island(size: size)
+                // Hover comes from the panel's tracking area, not `.onHover` — SwiftUI reports a
+                // spurious exit whenever the hosting view resizes, and the window now resizes on hover.
+                .contentShape(Rectangle())
+                .onTapGesture { coordinator.toggle() }
+                // `position` makes the interpolation explicit: x stays centred while y tracks
+                // half the changing height, so the visual top remains at y == 0 throughout.
+                .position(x: proxy.size.width / 2, y: size.height / 2)
+                .animation(expansionAnimation, value: coordinator.layoutToken)
+        }
     }
 
     private func island(size: CGSize) -> some View {
@@ -37,7 +40,7 @@ struct IslandView: View {
         if coordinator.isExpanded {
             ExpandedView(coordinator: coordinator)
                 .frame(width: size.width, height: size.height)
-                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+                .transition(.opacity)
         } else if let activity = coordinator.current {
             CompactActivityView(activity: activity, coordinator: coordinator)
                 .frame(width: size.width, height: coordinator.geometry.collapsedSize.height)
@@ -207,4 +210,3 @@ struct Artwork: View {
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 }
-

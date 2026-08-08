@@ -39,7 +39,12 @@ func runSelfTests() {
     // --- Coordinator: panel must always contain the largest island ---
     let c = IslandCoordinator(geometry: g)
     assert(c.currentSize == g.collapsedSize, "must start collapsed")
+    var sizeAtExpansion: CGSize?
+    c.onExpand = { sizeAtExpansion = c.currentSize }
     c.toggle()
+    assert(sizeAtExpansion == IslandCoordinator.expandedSize,
+           "expansion must start from expanded geometry, not briefly lay out the resting size")
+    c.onExpand = nil
     assert(c.currentSize == IslandCoordinator.expandedSize, "expanding did not change size")
     assert(c.panelSize.width >= c.currentSize.width, "panel narrower than expanded island")
     assert(c.panelSize.height >= c.currentSize.height, "panel shorter than expanded island")
