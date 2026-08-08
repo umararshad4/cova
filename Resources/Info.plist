@@ -2,14 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleName</key>
-	<string>Tyland</string>
 	<key>CFBundleDisplayName</key>
 	<string>Tyland</string>
 	<key>CFBundleExecutable</key>
 	<string>Tyland</string>
 	<key>CFBundleIdentifier</key>
 	<string>dev.local.tyland</string>
+	<key>CFBundleName</key>
+	<string>Tyland</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -20,24 +20,21 @@
 	<string>14.0</string>
 	<key>LSUIElement</key>
 	<true/>
-	<key>NSHighResolutionCapable</key>
-	<true/>
-	<key>NSCalendarsUsageDescription</key>
-	<string>Tyland shows your upcoming events in the notch.</string>
-	<!-- requestFullAccessToEvents (macOS 14+) requires this specific key; without it TCC
-	     terminates the process with a privacy violation rather than just denying access. -->
-	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>Tyland shows your upcoming events in the notch.</string>
-	<!-- ActivityService enumerates capture devices to detect camera use. -->
-	<key>NSCameraUsageDescription</key>
-	<string>Tyland shows an indicator when your camera is in use.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Tyland shows an indicator when your microphone is in use.</string>
-	<key>NSBluetoothAlwaysUsageDescription</key>
-	<string>Tyland shows connected device battery in the notch.</string>
-	<key>NSAudioCaptureUsageDescription</key>
-	<string>Tyland needs your permission to display the live waveform.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Tyland needs your permission to control and display your playing music.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Tyland needs your permission to display the live waveform.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Tyland shows connected device battery in the notch.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Tyland shows your upcoming events in the notch.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Tyland shows your upcoming events in the notch.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Tyland shows an indicator when your camera is in use.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Tyland shows an indicator when your microphone is in use.</string>
 </dict>
 </plist>
