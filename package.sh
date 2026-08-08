@@ -11,6 +11,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 APP="$ROOT/build/Tyland.app"
 STAGE="$ROOT/build/dmg"
 DMG="$ROOT/build/Tyland.dmg"
+RAW="$ROOT/build/Tyland.raw.dmg"
 ZIP="$ROOT/build/Tyland.zip"
 
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$ROOT/Resources/Info.plist" 2>/dev/null || echo "0.1.0")
@@ -30,7 +31,7 @@ ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 echo "built $ZIP ($(du -h "$ZIP" | cut -f1))"
 
 # --- DMG, best effort -------------------------------------------------------
-rm -rf "$STAGE" "$DMG"
+rm -rf "$STAGE" "$DMG" "$RAW"
 mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
@@ -58,12 +59,12 @@ run_with_timeout() {
 
 # makehybrid + convert never attach a volume, unlike `hdiutil create -srcfolder`.
 if run_with_timeout 120 hdiutil makehybrid -hfs -hfs-volume-name "Tyland $VERSION" \
-     -o "$DMG.raw" "$STAGE" -quiet 2>/dev/null \
-   && run_with_timeout 120 hdiutil convert "$DMG.raw" -format UDZO -o "$DMG" -quiet 2>/dev/null; then
-  rm -f "$DMG.raw"
+     -o "$RAW" "$STAGE" -quiet 2>/dev/null \
+   && run_with_timeout 120 hdiutil convert "$RAW" -format UDZO -o "$DMG" -quiet 2>/dev/null; then
+  rm -f "$RAW"
   echo "built $DMG ($(du -h "$DMG" | cut -f1))"
 else
-  rm -f "$DMG" "$DMG.raw"
+  rm -f "$DMG" "$RAW"
   echo "hdiutil unavailable or hung — skipped the DMG. Install from $ZIP instead." >&2
 fi
 
