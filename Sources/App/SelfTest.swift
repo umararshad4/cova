@@ -46,6 +46,19 @@ func runSelfTests() {
     c.collapse()
     assert(!c.isExpanded, "collapse() failed")
 
+    // --- Hover hot zone must track the island, not the window it grows ---
+    // The window is always wider than the island and grows ahead of expansion; if the hot zone ever
+    // follows the window, hovering feeds itself and the island chatters open and shut.
+    let collapsedZone = NotchPanel.hotZone(island: c.currentSize, geometry: g)
+    assert(collapsedZone.width < c.panelSize.width, "collapsed hot zone must be smaller than the panel")
+    assert(collapsedZone.contains(CGPoint(x: g.centerX, y: g.topY - 1)), "notch centre must be hot")
+    assert(!collapsedZone.contains(CGPoint(x: g.centerX, y: g.topY - IslandCoordinator.expandedSize.height)),
+           "collapsed hot zone must not reach where only the expanded island goes")
+    c.toggle()
+    assert(NotchPanel.hotZone(island: c.currentSize, geometry: g).width > collapsedZone.width,
+           "expanded hot zone should cover the expanded island")
+    c.collapse()
+
     // --- Activity priority: a HUD must preempt music, and music must come back ---
     c.push(.nowPlaying)
     assert(c.current == .nowPlaying, "live activity should show when nothing outranks it")

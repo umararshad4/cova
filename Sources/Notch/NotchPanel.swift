@@ -7,18 +7,24 @@ private final class IslandHostingView<Content: View>: NSHostingView<Content> {
     var hotRect: () -> CGRect = { .zero }
     var onScroll: ((NSEvent) -> Void)?
     var onHover: ((Bool) -> Void)?
+    /// Whether the pointer is over the island right now. Supplied by the panel in screen space.
+    var pointerIsHot: () -> Bool = { false }
 
     private var tracking: NSTrackingArea?
+    private var hovering = false
 
     /// Hover is tracked here rather than with SwiftUI's `.onHover`, which reports a spurious exit
-    /// every time the hosting view resizes. Since the window now resizes *because* of hover, that
+    /// every time the hosting view resizes. Since the window resizes *because* of hover, that
     /// produced an expand/collapse oscillation that read as flicker.
+    ///
+    /// `.mouseMoved` matters as much as enter/exit: the window is wider than the island, so the
+    /// pointer can cross from the fillet slack onto the island without ever entering the view.
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let tracking { removeTrackingArea(tracking) }
         let area = NSTrackingArea(
             rect: .zero,
-            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .inVisibleRect],
             owner: self,
             userInfo: nil
         )
@@ -26,23 +32,22 @@ private final class IslandHostingView<Content: View>: NSHostingView<Content> {
         tracking = area
     }
 
-    // Enter/exit events are only a cheap trigger — the pointer's actual position is the source of
-    // truth. Re-adding a tracking area (which every resize does) re-fires `mouseEntered` even when
-    // the pointer is nowhere near, and since the window resizes *because* of hover, trusting the
-    // event produced a self-sustaining expand/resize/enter loop.
-    override func mouseEntered(with event: NSEvent) {
-        guard pointerIsInside else { return }
-        onHover?(true)
-    }
+    override func mouseEntered(with event: NSEvent) { syncHover() }
+    override func mouseMoved(with event: NSEvent) { syncHover() }
+    override func mouseExited(with event: NSEvent) { syncHover() }
 
-    override func mouseExited(with event: NSEvent) {
-        guard !pointerIsInside else { return }
-        onHover?(false)
-    }
-
-    private var pointerIsInside: Bool {
-        guard let window else { return false }
-        return window.frame.insetBy(dx: -2, dy: -2).contains(NSEvent.mouseLocation)
+    /// The one funnel every hover signal goes through, and the reason the island no longer flickers.
+    ///
+    /// Events are only a hint to re-check; the pointer's position against the island is the truth.
+    /// Every resize re-adds the tracking area and re-fires enter/exit, and expanding resizes the
+    /// window — so trusting the events directly meant hover drove a resize that re-triggered hover.
+    /// Deduping against the last reported state makes those echoes no-ops, including the ones that
+    /// arrive re-entrantly from inside `onHover` itself.
+    func syncHover() {
+        let hot = pointerIsHot()
+        guard hot != hovering else { return }
+        hovering = hot
+        onHover?(hot)
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -71,14 +76,35 @@ final class NotchPanel: NSPanel {
     var onScroll: ((NSEvent) -> Void)?
 
     private let coordinator: IslandCoordinator
+    private let host: IslandHostingView<IslandView>
     private var sizeObserver: AnyCancellable?
     private var shrink: DispatchWorkItem?
 
     /// Slack for the concave fillets that flow outward from the island's top corners.
     private static let filletSlack: CGFloat = 14
 
+    /// Margin around the island's edge, so a pointer resting on the boundary does not chatter.
+    private static let hoverSlop: CGFloat = 4
+
+    /// The island's own bounds in screen coordinates — the hover hot zone.
+    ///
+    /// Derived from the geometry and the island size, never from the window frame. The window is
+    /// larger than the island and grows *because* of hover, so measuring hover against it made the
+    /// hot zone a function of its own output: one sweep past the notch left the window expanded,
+    /// and from then on the island opened for a pointer anywhere in the top-centre of the screen.
+    static func hotZone(island: CGSize, geometry: NotchGeometry) -> CGRect {
+        CGRect(
+            x: geometry.centerX - island.width / 2,
+            y: geometry.topY - island.height,
+            width: island.width,
+            height: island.height
+        )
+        .insetBy(dx: -hoverSlop, dy: -hoverSlop)
+    }
+
     init(coordinator: IslandCoordinator, screen: NSScreen) {
         self.coordinator = coordinator
+        self.host = IslandHostingView(rootView: IslandView(coordinator: coordinator))
         super.init(
             contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],
@@ -99,23 +125,23 @@ final class NotchPanel: NSPanel {
         level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
 
-        let host = IslandHostingView(rootView: IslandView(coordinator: coordinator))
         host.hotRect = { [weak self] in self?.islandRect ?? .zero }
         host.onScroll = { [weak self] event in self?.onScroll?(event) }
+        host.pointerIsHot = { [weak self] in
+            guard let self else { return false }
+            return Self.hotZone(island: self.coordinator.currentSize, geometry: self.coordinator.geometry)
+                .contains(NSEvent.mouseLocation)
+        }
         host.onHover = { [weak self] inside in
-            // Grow before `hover` runs, not from inside it. Resizing the window re-adds the
-            // tracking area, which re-fires enter/exit — doing that *during* the hover state
-            // change is the self-sustaining expand/resize/enter oscillation this file exists to
-            // avoid. Growing first means the hook below is already a no-op by the time it fires.
-            if inside { self?.growForExpansion() }
             coordinator.hover(inside)
-            if inside { self?.watchForExit() }
+            inside ? self?.watchForExit() : self?.stopWatchingForExit()
         }
         contentView = host
 
-        // Covers the paths the block above cannot: tap-to-toggle, and a hover *delay*, where
-        // expansion happens long after the pointer arrived. Idempotent — `growForExpansion`
-        // returns without touching the frame once the window is already big enough.
+        // The single place the window grows, so it only ever happens when the island is actually
+        // about to expand — hover, tap-to-toggle and a hover *delay* all route through here. Growing
+        // on hover instead stranded the window at expanded size whenever the delay was cancelled or
+        // `expandOnHover` was off, because nothing published and nothing shrank it back.
         coordinator.onWillExpand = { [weak self] in self?.growForExpansion() }
 
         applyFrame(for: windowSize(), animated: false)
@@ -135,13 +161,8 @@ final class NotchPanel: NSPanel {
 
     private func watchForExit() {
         guard exitWatch == nil else { return }
-        exitWatch = Heartbeat.shared.subscribe(.fast) { [weak self] in
-            guard let self else { return }
-            // Generous margin so a pointer resting on the very edge does not chatter.
-            guard !self.frame.insetBy(dx: -6, dy: -6).contains(NSEvent.mouseLocation) else { return }
-            self.stopWatchingForExit()
-            self.coordinator.hover(false)
-        }
+        // Through the same funnel as the events, so the safety net can never disagree with them.
+        exitWatch = Heartbeat.shared.subscribe(.fast) { [weak self] in self?.host.syncHover() }
     }
 
     private func stopWatchingForExit() {
