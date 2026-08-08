@@ -35,10 +35,31 @@ mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 
+# macOS does not ship GNU `timeout`; run the non-attaching hdiutil commands with a tiny
+# shell watchdog so a wedged DiskArbitration service cannot hang the release job forever.
+run_with_timeout() {
+  local seconds="$1"; shift
+  "$@" &
+  local pid=$!
+
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$seconds" -le 0 ]; then
+      kill "$pid" 2>/dev/null || true
+      sleep 1
+      kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      return 124
+    fi
+    sleep 1
+    seconds=$((seconds - 1))
+  done
+  wait "$pid"
+}
+
 # makehybrid + convert never attach a volume, unlike `hdiutil create -srcfolder`.
-if timeout 120 hdiutil makehybrid -hfs -hfs-volume-name "Tyland $VERSION" \
+if run_with_timeout 120 hdiutil makehybrid -hfs -hfs-volume-name "Tyland $VERSION" \
      -o "$DMG.raw" "$STAGE" -quiet 2>/dev/null \
-   && timeout 120 hdiutil convert "$DMG.raw" -format UDZO -o "$DMG" -quiet 2>/dev/null; then
+   && run_with_timeout 120 hdiutil convert "$DMG.raw" -format UDZO -o "$DMG" -quiet 2>/dev/null; then
   rm -f "$DMG.raw"
   echo "built $DMG ($(du -h "$DMG" | cut -f1))"
 else

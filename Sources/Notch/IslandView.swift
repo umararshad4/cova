@@ -3,7 +3,7 @@ import SwiftUI
 struct IslandView: View {
     @ObservedObject var coordinator: IslandCoordinator
 
-    private var expansionAnimation: Animation { .easeInOut(duration: 0.25) }
+    private var expansionAnimation: Animation { .spring(response: 0.38, dampingFraction: 0.78) }
 
     var body: some View {
         let size = coordinator.currentSize

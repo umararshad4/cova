@@ -1,8 +1,8 @@
 name: Release
 
-# Cuts a version, builds the app, and attaches the DMG to a GitHub release — but only when the
-# commits since the last tag actually contain something worth releasing. A push of nothing but
-# docs/chore/ci commits is a no-op, so main stays pushable without minting dead versions.
+# Cuts a version, builds the app, and attaches the DMG to a GitHub release on every main push.
+# Conventional commits choose the semantic bump; a push with no releasable conventional commit
+# gets a patch bump so every push still has a changelog entry and a versioned artifact.
 #
 # Nothing attacker-controlled (commit messages, refs) is ever interpolated into a `run:` block —
 # messages only ever reach the shell through `git log`, where they stay data.

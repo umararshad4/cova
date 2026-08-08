@@ -47,18 +47,17 @@ and attaches `Tyland.dmg` (and `Tyland.zip`) to a GitHub release. [`CHANGELOG.md
 regenerated from the commit messages and committed back.
 
 The version comes from [conventional commits](https://www.conventionalcommits.org) since the last
-`vX.Y.Z` tag — so **the commit message is what decides whether a release happens at all**:
+`vX.Y.Z` tag — the commit message chooses the bump, while every push to `main` still publishes:
 
 | Commit                             | Bump  |
 | ---------------------------------- | ----- |
 | `feat!:` or a `BREAKING CHANGE:` trailer | major |
 | `feat:`                            | minor |
 | `fix:` / `perf:`                   | patch |
-| `docs:` / `chore:` / `refactor:` / `ci:` | none — no release |
+| `docs:` / `chore:` / `refactor:` / `ci:` | patch |
 
-A push of nothing but docs and chores is deliberately a no-op, so `main` stays pushable without
-minting dead versions. To ship one anyway, run the workflow manually from the Actions tab — a
-manual run always cuts at least a patch.
+A push of nothing but docs and chores still cuts a patch release, keeping the published artifact
+and changelog aligned with every `main` push. A manual workflow run also cuts at least a patch.
 
 The version is stamped into `Info.plist` at build time, so a local `./package.sh` and a released
 build report the same number. The bump logic is a plain script, and it tests itself:

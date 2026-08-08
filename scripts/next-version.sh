@@ -41,8 +41,8 @@ next_version() {
     bump=minor
   elif printf '%s' "$log" | grep -qE "$PATCHY"; then
     bump=patch
-  elif [ "${EVENT:-}" = "workflow_dispatch" ]; then
-    bump=patch   # a manual run always ships something
+  elif [ "${EVENT:-}" = "workflow_dispatch" ] || [ "${EVENT:-}" = "push" ]; then
+    bump=patch   # every main push/manual run ships something, even docs-only changes
   else
     bump=none
   fi
@@ -117,6 +117,8 @@ BREAKING CHANGE: the thing moved"
   case_ "breaking outranks all"   "2.0.0" "v1.2.3" "fix: a" "feat: b" "refactor!: c"
   case_ "docs alone release nothing" "none" "v1.2.3" "docs: tweak the readme"
   case_ "chore alone releases nothing" "none" "v1.2.3" "chore: bump a dep"
+  EVENT=push case_ "push docs always ships" "1.2.4" "v1.2.3" "docs: tweak the readme"
+  EVENT=push case_ "push chore always ships" "1.2.4" "v1.2.3" "chore: bump a dep"
   case_ "prerelease tag is not a release" "0.1.0" "v1.2.3-beta" "feat: add a thing"
   case_ "picks the newest tag, not the longest" "1.11.0" "v1.9.0 v1.10.0" "feat: add a thing"
   case_ "ignores junk tags alongside real ones" "1.2.4" "nightly v1.2.3" "fix: repair a thing"
