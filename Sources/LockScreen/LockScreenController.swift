@@ -306,13 +306,24 @@ struct LockScreenView: View {
 }
 
 /// Only the transport buttons accept clicks. Everything else in the lock-screen card passes
-/// through, so the card cannot intercept a click intended for the login field behind it.
+/// through, so the card cannot intercept a click meant for the login field behind it.
+///
+/// The rect is explicit rather than delegated to SwiftUI: `NSHostingView` reports *itself* as the
+/// hit for any interactive SwiftUI content, so testing `hit === self` would have rejected the
+/// buttons too and left them dead.
 private final class LockScreenHostingView<Content: View>: NSHostingView<Content> {
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard let hit = super.hitTest(point) else { return nil }
-        // SwiftUI leaf views that opted into hit testing are the buttons; the card background is
-        // drawn with `allowsHitTesting(false)` and never reports a hit.
-        return hit === self ? nil : hit
+        // Width of the trailing strip the transport row occupies, plus a little slack.
+        // A `static let` is not allowed on a generic type, so it lives here.
+        let controlsWidth: CGFloat = 140
+        let local = superview.map { convert(point, from: $0) } ?? point
+        let controls = CGRect(
+            x: bounds.maxX - controlsWidth,
+            y: bounds.minY,
+            width: controlsWidth,
+            height: bounds.height
+        )
+        return controls.contains(local) ? super.hitTest(point) : nil
     }
 }
 

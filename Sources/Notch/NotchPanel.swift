@@ -103,16 +103,19 @@ final class NotchPanel: NSPanel {
         host.hotRect = { [weak self] in self?.islandRect ?? .zero }
         host.onScroll = { [weak self] event in self?.onScroll?(event) }
         host.onHover = { [weak self] inside in
+            // Grow before `hover` runs, not from inside it. Resizing the window re-adds the
+            // tracking area, which re-fires enter/exit — doing that *during* the hover state
+            // change is the self-sustaining expand/resize/enter oscillation this file exists to
+            // avoid. Growing first means the hook below is already a no-op by the time it fires.
+            if inside { self?.growForExpansion() }
             coordinator.hover(inside)
             if inside { self?.watchForExit() }
         }
         contentView = host
 
-        // Grow *before* the state change reaches SwiftUI. Going through objectWillChange is
-        // asynchronous, so the first expanded frame gets drawn into a still-collapsed window and
-        // clipped — the island's bottom corners read as square until the window catches up.
-        // Hooked on the coordinator rather than on hover: tap-to-toggle expands too, and used to
-        // miss the pre-grow entirely.
+        // Covers the paths the block above cannot: tap-to-toggle, and a hover *delay*, where
+        // expansion happens long after the pointer arrived. Idempotent — `growForExpansion`
+        // returns without touching the frame once the window is already big enough.
         coordinator.onWillExpand = { [weak self] in self?.growForExpansion() }
 
         applyFrame(for: windowSize(), animated: false)
@@ -167,12 +170,9 @@ final class NotchPanel: NSPanel {
             width: island.width + Self.filletSlack * 2,
             height: island.height + Self.filletSlack
         )
-        // Cancel first: re-hovering during the collapse leaves the window still big, so the guard
-        // below returns early and a shrink scheduled by the *previous* collapse would otherwise
-        // stay armed while the island is reopening.
+        guard target.width > frame.width || target.height > frame.height else { return }
         shrink?.cancel()
         shrink = nil
-        guard target.width > frame.width || target.height > frame.height else { return }
         applyFrame(for: target, animated: false)
     }
 
