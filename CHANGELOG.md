@@ -5,6 +5,13 @@ Every version here has a matching GitHub release with a `Tyland.dmg` attached.
 
 <!-- next -->
 
+## v0.4.1 — 2026-08-09
+
+### Fixes
+
+- refresh progress while files grow (611ce9e)
+
+
 ## v0.4.0 — 2026-08-09
 
 ### Features
