@@ -261,6 +261,30 @@ func runSelfTests() {
     assert(unknownDownload.fraction == nil,
            "missing browser total must remain indeterminate, never invent a percentage")
 
+    let downloads = DownloadsService(directoryURL: downloadFixture)
+    var observedDownloadBytes: [Int64] = []
+    downloads.onProgress = { observedDownloadBytes.append($0.receivedBytes) }
+    downloads.start()
+    func waitForDownload(_ condition: () -> Bool) -> Bool {
+        let deadline = Date().addingTimeInterval(1.5)
+        while Date() < deadline {
+            if condition() { return true }
+            RunLoop.current.run(until: min(deadline, Date().addingTimeInterval(0.05)))
+        }
+        return condition()
+    }
+    assert(waitForDownload { observedDownloadBytes.last == 2_048 },
+           "download service must publish its initial snapshot")
+    let partialHandle = try! FileHandle(
+        forWritingTo: downloadFixture.appendingPathComponent("sample.crdownload")
+    )
+    try! partialHandle.seekToEnd()
+    try! partialHandle.write(contentsOf: Data(repeating: 0, count: 2_048))
+    try! partialHandle.close()
+    assert(waitForDownload { observedDownloadBytes.last == 4_096 },
+           "download progress must refresh while an existing partial file grows")
+    downloads.stop()
+
     // --- Battery ring thresholds ---
     assert(BatteryRing.tint(for: 90) == .green, "high battery green")
     assert(BatteryRing.tint(for: 35) == .yellow, "middling battery yellow")

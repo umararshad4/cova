@@ -16,17 +16,23 @@ final class DownloadsService {
     private var descriptor: CInt = -1
     private var current = DownloadProgress(count: 0, receivedBytes: 0, totalBytes: nil)
     private var scanTask: Task<Void, Never>?
+    private var pollTask: Task<Void, Never>?
     private var trackedPartial: String?
     private var trackedTotalBytes: Int64?
     private var lastTotalLookup = Date.distantPast
     private let queue = DispatchQueue(label: "dev.local.tyland.downloads")
+    private let directoryURL: URL?
 
     /// Safari, Chrome/Edge, Firefox respectively.
     nonisolated static let partialExtensions: Set<String> = ["download", "crdownload", "part"]
 
     private var downloadsURL: URL {
-        FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        directoryURL ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Downloads")
+    }
+
+    init(directoryURL: URL? = nil) {
+        self.directoryURL = directoryURL
     }
 
     func start() {
@@ -65,6 +71,7 @@ final class DownloadsService {
     }
 
     func stop() {
+        stopPolling()
         scanTask?.cancel()
         scanTask = nil
         watcher?.cancel()
@@ -130,9 +137,27 @@ final class DownloadsService {
         guard progress != current else { return }
         let previous = current
         current = progress
+        if progress.count > 0 { startPolling() } else { stopPolling() }
         onProgress?(progress)
         // Going from "some" to "none" is the completion edge.
         if !silent, previous.count > 0, progress.count == 0 { onComplete?() }
+    }
+
+    private func startPolling() {
+        guard pollTask == nil else { return }
+        pollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .milliseconds(500)) }
+                catch { break }
+                guard let self else { break }
+                self.scan()
+            }
+        }
+    }
+
+    private func stopPolling() {
+        pollTask?.cancel()
+        pollTask = nil
     }
 
     nonisolated static func countPartials(in directory: URL) -> Int {
