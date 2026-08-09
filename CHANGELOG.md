@@ -5,6 +5,13 @@ Every version here has a matching GitHub release with a `Tyland.dmg` attached.
 
 <!-- next -->
 
+## v0.3.3 — 2026-08-09
+
+### Fixes
+
+- polish expanded media controls (4fbb78c)
+
+
 ## v0.3.2 — 2026-08-09
 
 ### Fixes
