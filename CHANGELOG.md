@@ -5,6 +5,13 @@ Every version here has a matching GitHub release with a `Tyland.dmg` attached.
 
 <!-- next -->
 
+## v0.2.2 — 2026-08-09
+
+### Fixes
+
+- refresh delayed artwork and suppress sensor drift (c7abfdf)
+
+
 ## v0.2.1 — 2026-08-08
 
 ### Fixes
