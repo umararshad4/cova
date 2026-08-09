@@ -39,8 +39,21 @@ private let setElapsed = symbol("MRMediaRemoteSetElapsedTime", as: SetElapsed.se
 // the head of the line and the now-playing callback never runs.
 private let queue = DispatchQueue(label: "tyland.helper.mediaremote", attributes: .concurrent)
 
-/// Artwork is large and rarely changes; only resend it when the track actually changes.
-private var lastTrackKey = ""
+/// Artwork can arrive after the rest of the metadata, especially from browsers and VLC.
+private struct ArtworkTracker {
+    private var trackKey = ""
+    private var artwork: Data?
+
+    mutating func encodedArtwork(trackKey: String, artwork: Data?, force: Bool = false) -> String? {
+        let shouldEmit = force || trackKey != self.trackKey || artwork != self.artwork
+        self.trackKey = trackKey
+        self.artwork = artwork
+        guard shouldEmit else { return nil }
+        return artwork?.base64EncodedString() ?? ""
+    }
+}
+
+private var artworkTracker = ArtworkTracker()
 
 private let debugEnabled = ProcessInfo.processInfo.environment["TYLAND_DEBUG"] == "1"
 
@@ -131,14 +144,13 @@ private func emit(force: Bool = false) {
         payload["bundleIdentifier"] = cache.bundle
 
         let trackKey = "\(title)|\(artist)|\(album)"
-        if trackKey != lastTrackKey || force {
-            lastTrackKey = trackKey
-            if let art = info["kMRMediaRemoteNowPlayingInfoArtworkData"] as? Data {
-                payload["artwork"] = art.base64EncodedString()
-            } else {
-                payload["artwork"] = ""
-            }
-        }
+        let artwork = info["kMRMediaRemoteNowPlayingInfoArtworkData"] as? Data
+        cacheLock.lock()
+        let encodedArtwork = artworkTracker.encodedArtwork(
+            trackKey: trackKey, artwork: artwork, force: force
+        )
+        cacheLock.unlock()
+        if let encodedArtwork { payload["artwork"] = encodedArtwork }
 
         write(payload)
     }
@@ -165,6 +177,16 @@ private func handle(command: String) {
 }
 
 // MARK: - Entry
+
+if CommandLine.arguments.contains("artwork-test") {
+    var tracker = ArtworkTracker()
+    let cover = Data("delayed-cover".utf8)
+    _ = tracker.encodedArtwork(trackKey: "video", artwork: nil, force: true)
+    assert(tracker.encodedArtwork(trackKey: "video", artwork: cover) == cover.base64EncodedString(),
+           "artwork arriving after metadata must be emitted")
+    print("artwork test passed")
+    exit(0)
+}
 
 if CommandLine.arguments.contains("test") {
     // Exit 0 only if MediaRemote answers — this is what proves the signing-identifier trick worked.

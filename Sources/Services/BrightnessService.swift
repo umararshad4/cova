@@ -24,8 +24,12 @@ final class BrightnessService {
     private var primed = false
     private var display: CGDirectDisplayID = CGMainDisplayID()
 
-    /// Ignore drift below this so ambient auto-brightness doesn't spam the island.
-    private let threshold: Float = 0.005
+    /// Brightness keys move in visible steps; ambient sensors drift in much smaller increments.
+    private static let hudStepThreshold: Float = 0.02
+
+    static func shouldShowHUD(from previous: Float, to current: Float) -> Bool {
+        abs(current - previous) >= hudStepThreshold
+    }
 
     var isAvailable: Bool { Private.displayServicesGetBrightness != nil }
 
@@ -51,13 +55,15 @@ final class BrightnessService {
     private func tick() {
         guard primed else { return }
 
-        if let value = readDisplay(), abs(value - displayBrightness) > threshold {
+        if let value = readDisplay() {
+            let shouldNotify = Self.shouldShowHUD(from: displayBrightness, to: value)
             displayBrightness = value
-            onDisplayChange?(value)
+            if shouldNotify { onDisplayChange?(value) }
         }
-        if let value = Private.keyboardBrightness(), abs(value - keyboardBrightness) > threshold {
+        if let value = Private.keyboardBrightness() {
+            let shouldNotify = Self.shouldShowHUD(from: keyboardBrightness, to: value)
             keyboardBrightness = value
-            onKeyboardChange?(value)
+            if shouldNotify { onKeyboardChange?(value) }
         }
     }
 

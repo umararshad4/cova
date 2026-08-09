@@ -36,6 +36,12 @@ func runSelfTests() {
         assert(calibrated.collapsedSize == CGSize(width: 240, height: 38), "calibration ignored")
     }
 
+    // --- Brightness: ambient sensor drift must not look like a user key press ---
+    assert(!BrightnessService.shouldShowHUD(from: 0.45426846, to: 0.46384272),
+           "observed keyboard-backlight drift must not show the HUD")
+    assert(BrightnessService.shouldShowHUD(from: 0.45, to: 0.51),
+           "a normal brightness-key step must show the HUD")
+
     // --- Coordinator: panel must always contain the largest island ---
     let c = IslandCoordinator(geometry: g)
     assert(c.currentSize == g.collapsedSize, "must start collapsed")
