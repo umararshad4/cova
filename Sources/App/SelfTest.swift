@@ -36,11 +36,28 @@ func runSelfTests() {
         assert(calibrated.collapsedSize == CGSize(width: 240, height: 38), "calibration ignored")
     }
 
-    // --- Brightness: ambient sensor drift must not look like a user key press ---
-    assert(!BrightnessService.shouldShowHUD(from: 0.45426846, to: 0.46384272),
-           "observed keyboard-backlight drift must not show the HUD")
-    assert(BrightnessService.shouldShowHUD(from: 0.45, to: 0.51),
-           "a normal brightness-key step must show the HUD")
+    // --- Brightness: automatic sensor changes must never look like key presses ---
+    let brightness = BrightnessService()
+    var displayHUDs = 0
+    var keyboardHUDs = 0
+    brightness.onDisplayChange = { _ in displayHUDs += 1 }
+    brightness.onKeyboardChange = { _ in keyboardHUDs += 1 }
+    brightness.accept(display: 0.8, keyboard: 0.2, requestedHUD: nil)
+    assert(displayHUDs == 0 && keyboardHUDs == 0,
+           "sensor-only brightness changes must stay silent")
+    let displayKeyDown = (2 << 16) | (10 << 8)
+    assert(BrightnessService.hudTarget(subtype: 8, data1: displayKeyDown) == .display,
+           "display-brightness key-down must request the display HUD")
+    let keyboardKeyDown = (21 << 16) | (10 << 8)
+    assert(BrightnessService.hudTarget(subtype: 8, data1: keyboardKeyDown) == .keyboard,
+           "keyboard-brightness key-down must request the keyboard HUD")
+    let displayKeyUp = (2 << 16) | (11 << 8)
+    assert(BrightnessService.hudTarget(subtype: 8, data1: displayKeyUp) == nil,
+           "brightness key-up must not duplicate the HUD")
+    brightness.accept(display: 0.9, keyboard: 0.3, requestedHUD: .display)
+    brightness.accept(display: 0.9, keyboard: 0.3, requestedHUD: .keyboard)
+    assert(displayHUDs == 1 && keyboardHUDs == 1,
+           "each explicit brightness key must show only its matching HUD")
 
     // --- Coordinator: panel must always contain the largest island ---
     let c = IslandCoordinator(geometry: g)
@@ -94,6 +111,15 @@ func runSelfTests() {
     c.withdraw(slot: "focus")
     assert(c.current == nil, "withdrawing everything must return to bare notch")
     assert(c.currentSize == g.collapsedSize, "bare notch must be exactly the notch size")
+
+    // Charging remains visible after the one-shot plug-in HUD has expired.
+    c.battery = .init(percent: 50, isCharging: true, isPluggedIn: true, isCharged: false)
+    assert(c.currentSize.width > g.collapsedSize.width,
+           "active charging must reserve room for its persistent indicator")
+    c.push(.power(.pluggedIn(percent: 50)))
+    assert(c.showsChargingAccessory,
+           "persistent charging icon must appear on the first plug-in frame")
+    c.withdraw(slot: "power")
 
     // --- MediaState: progress must extrapolate, and never divide by a bad duration ---
     var m = MediaState()

@@ -1,35 +1,24 @@
 import AppKit
 import CoreGraphics
 
-/// Watches display and keyboard-backlight brightness.
-///
-/// There is no public change notification for either. Alcove links
-/// `DisplayServicesRegisterForBrightnessChangeNotifications`, but that callback's exact signature
-/// is undocumented and has drifted between releases, so getting it wrong crashes rather than
-/// degrades. We read through `DisplayServicesGetBrightness` — which is stable and cheap — on a
-/// coalescing timer instead.
-///
-/// ponytail: 250 ms poll of two C calls, ~nothing on the CPU budget, and it rides the shared
-/// `Heartbeat` rather than owning a timer. If Apple ever ships a real notification, or the callback
-/// signature gets pinned down, swap `tick()` for a subscription and drop the heartbeat use.
+/// Shows brightness HUDs only for physical brightness-key presses. Automatic display and keyboard
+/// illumination changes are intentionally silent.
 @MainActor
 final class BrightnessService {
+    enum HUDTarget: Equatable {
+        case display
+        case keyboard
+    }
+
     private(set) var displayBrightness: Float = 0
     private(set) var keyboardBrightness: Float = 0
 
     var onDisplayChange: ((Float) -> Void)?
     var onKeyboardChange: ((Float) -> Void)?
 
-    private var token: Heartbeat.Token?
-    private var primed = false
+    private var globalMonitor: Any?
+    private var localMonitor: Any?
     private var display: CGDirectDisplayID = CGMainDisplayID()
-
-    /// Brightness keys move in visible steps; ambient sensors drift in much smaller increments.
-    private static let hudStepThreshold: Float = 0.02
-
-    static func shouldShowHUD(from previous: Float, to current: Float) -> Bool {
-        abs(current - previous) >= hudStepThreshold
-    }
 
     var isAvailable: Bool { Private.displayServicesGetBrightness != nil }
 
@@ -37,14 +26,20 @@ final class BrightnessService {
         display = CGMainDisplayID()
         displayBrightness = readDisplay() ?? 0
         keyboardBrightness = Private.keyboardBrightness() ?? 0
-        primed = true
-
-        token = Heartbeat.shared.subscribe(.fast) { [weak self] in self?.tick() }
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .systemDefined) { [weak self] event in
+            MainActor.assumeIsolated { self?.handle(event) }
+        }
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .systemDefined) { [weak self] event in
+            MainActor.assumeIsolated { self?.handle(event) }
+            return event
+        }
     }
 
     func stop() {
-        if let token { Heartbeat.shared.cancel(token) }
-        token = nil
+        if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
+        if let localMonitor { NSEvent.removeMonitor(localMonitor) }
+        globalMonitor = nil
+        localMonitor = nil
     }
 
     func setDisplayBrightness(_ value: Float) {
@@ -52,18 +47,40 @@ final class BrightnessService {
         _ = set(display, min(max(value, 0), 1))
     }
 
-    private func tick() {
-        guard primed else { return }
-
-        if let value = readDisplay() {
-            let shouldNotify = Self.shouldShowHUD(from: displayBrightness, to: value)
-            displayBrightness = value
-            if shouldNotify { onDisplayChange?(value) }
+    static func hudTarget(subtype: Int16, data1: Int) -> HUDTarget? {
+        // NX_SUBTYPE_AUX_CONTROL_BUTTONS and NX_KEYDOWN from IOKit/hidsystem/IOLLEvent.h.
+        guard subtype == 8, (data1 >> 8) & 0xFF == 10 else { return nil }
+        switch (data1 >> 16) & 0xFFFF {
+        case 2, 3: return .display
+        case 21, 22, 23: return .keyboard
+        default: return nil
         }
-        if let value = Private.keyboardBrightness() {
-            let shouldNotify = Self.shouldShowHUD(from: keyboardBrightness, to: value)
+    }
+
+    private func handle(_ event: NSEvent) {
+        guard let target = Self.hudTarget(subtype: event.subtype.rawValue, data1: event.data1) else {
+            return
+        }
+        // Read one main-loop turn after the key event so macOS has applied the new level first.
+        Task { [weak self] in
+            await Task.yield()
+            guard let self else { return }
+            self.accept(
+                display: self.readDisplay(),
+                keyboard: Private.keyboardBrightness(),
+                requestedHUD: target
+            )
+        }
+    }
+
+    func accept(display: Float?, keyboard: Float?, requestedHUD: HUDTarget?) {
+        if let value = display {
+            displayBrightness = value
+            if requestedHUD == .display { onDisplayChange?(value) }
+        }
+        if let value = keyboard {
             keyboardBrightness = value
-            if shouldNotify { onKeyboardChange?(value) }
+            if requestedHUD == .keyboard { onKeyboardChange?(value) }
         }
     }
 

@@ -38,6 +38,7 @@ final class IslandCoordinator: ObservableObject {
 
     static let expandedSize = CGSize(width: 380, height: 150)
     static let panelPadding: CGFloat = 40
+    static let chargingAccessorySideWidth: CGFloat = 28
 
     private var live: [String: Activity] = [:]
     private var transient: Activity?
@@ -129,12 +130,25 @@ final class IslandCoordinator: ObservableObject {
 
     // MARK: - Layout
 
+    /// Charging is an ambient accessory, including during the first plug-in frame.
+    var showsChargingAccessory: Bool {
+        battery?.isCharging == true
+    }
+
     var currentSize: CGSize {
         if isExpanded { return Self.expandedSize }
-        guard let current else { return geometry.collapsedSize }
+        // The physical notch stays centred, so a right-side accessory needs matching clear space
+        // on the left; otherwise half the icon lands behind the camera housing.
+        let chargingWidth = showsChargingAccessory ? Self.chargingAccessorySideWidth * 2 : 0
+        guard let current else {
+            return CGSize(
+                width: geometry.collapsedSize.width + chargingWidth,
+                height: chargingWidth > 0 ? geometry.collapsedSize.height + 2 : geometry.collapsedSize.height
+            )
+        }
         let sides = current.sideWidths
         return CGSize(
-            width: geometry.collapsedSize.width + sides.leading + sides.trailing,
+            width: geometry.collapsedSize.width + sides.leading + sides.trailing + chargingWidth,
             height: geometry.collapsedSize.height + 2
         )
     }

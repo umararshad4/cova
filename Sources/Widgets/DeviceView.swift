@@ -59,39 +59,49 @@ struct BatteryRing: View, Animatable {
     }
 }
 
-/// Compact form: device symbol inside its battery ring.
-///
-/// Three staggered passes rather than one scale-up: a pairing ripple pushes outward, the symbol
-/// springs in out of focus, and the battery ring sweeps around it.
+/// Compact connection flourish: a coloured device icon with wireless waves, never a battery ring.
 struct DeviceGlyph: View {
+    static let connectedTint = Color(red: 0.25, green: 0.72, blue: 1)
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let device: DeviceEvent
-    /// 0 = hidden, 1 = settled. Drives the symbol and the ring sweep together.
-    @State private var phase: CGFloat = 0
-    /// 0 → 1 once, outward. Separate from `phase` so it can outrun the spring.
-    @State private var ripple: CGFloat = 0
+    @State private var shown = false
+    @State private var waves = false
 
     var body: some View {
         ZStack {
             if device.connected {
-                Circle()
-                    .strokeBorder(.white.opacity(0.45 * (1 - ripple)), lineWidth: 1.5)
-                    .scaleEffect(0.55 + ripple * 0.75)
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(Self.connectedTint)
+                    .scaleEffect(waves ? 1.18 : 0.68)
+                    .opacity(waves ? 0.08 : 0.75)
             }
-            if let percent = device.ringPercent, device.connected {
-                BatteryRing(percent: percent, fill: Double(phase))
-            }
+
             Image(systemName: device.symbol)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white)
-                .blur(radius: (1 - phase) * 2.5)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(device.connected ? Self.connectedTint : .red)
+                .shadow(
+                    color: (device.connected ? Self.connectedTint : .red).opacity(0.65),
+                    radius: 4
+                )
         }
         .frame(width: 28, height: 28)
-        .scaleEffect(0.5 + phase * 0.5)
-        .opacity(Double(phase))
+        .scaleEffect(shown ? 1 : 0.6)
+        .opacity(shown ? 1 : 0)
         .onAppear {
-            withAnimation(.interpolatingSpring(stiffness: 240, damping: 14)) { phase = 1 }
-            withAnimation(.easeOut(duration: 0.85)) { ripple = 1 }
+            if reduceMotion {
+                shown = true
+            } else {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) { shown = true }
+            }
+            waves = !reduceMotion
         }
+        .onChange(of: reduceMotion) { _, reduced in waves = !reduced }
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: 1).repeatForever(autoreverses: false),
+            value: waves
+        )
     }
 }
 
