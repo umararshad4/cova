@@ -3,60 +3,75 @@ import SwiftUI
 struct NowPlayingPanel: View {
     @ObservedObject var coordinator: IslandCoordinator
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Definite width for the text column. The island is a fixed size, so a `.infinity` chain
-    /// wrapped around a `GeometryReader` leaves the layout unresolved and the window never
-    /// composites — AppKit reports it visible while the window server holds a 0x0 surface.
-    var textWidth: CGFloat = 186
 
     private var media: MediaState { coordinator.media ?? MediaState() }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Artwork(image: media.artwork, size: 54, cornerRadius: 11)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(media.hasTrack ? media.displayTitle : "Nothing Playing")
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-
-                Text(media.artist)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .lineLimit(1)
-
-                // `liveElapsed` reads the clock, but nothing publishes between helper events, so
-                // the body never re-ran and the bar sat frozen until the track changed. Tick just
-                // this subtree: 60 Hz drives the wave while playing, Reduce Motion returns to 2 Hz,
-                // and the schedule idles while paused.
-                TimelineView(.animation(
-                    minimumInterval: reduceMotion ? 0.5 : 1.0 / 60.0,
-                    paused: !media.isPlaying || !coordinator.effectsActive
-                )) { timeline in
-                    Scrubber(
-                        progress: media.progress,
-                        elapsed: media.liveElapsed,
-                        duration: media.duration,
-                        tint: media.accent,
-                        isPlaying: media.isPlaying && coordinator.effectsActive,
-                        wavePhase: reduceMotion ? 0 : CGFloat(
-                            timeline.date.timeIntervalSinceReferenceDate
-                                .truncatingRemainder(
-                                    dividingBy: Double(ScrubberBar.wavelength / ScrubberBar.waveSpeed)
-                                )
-                        ) * ScrubberBar.waveSpeed
-                    ) { fraction in
-                        coordinator.mediaSeek?(fraction * media.duration)
+        VStack(spacing: 5) {
+            HStack(spacing: 10) {
+                Artwork(image: media.artwork, size: 42, cornerRadius: 10)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(
+                                LinearGradient(
+                                    colors: [.white.opacity(0.32), .white.opacity(0.06)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 0.75
+                            )
                     }
-                }
-                .padding(.top, 3)
+                    .shadow(color: media.accent.opacity(0.3), radius: 9, y: 3)
 
-                TransportControls(isPlaying: media.isPlaying) { command in
-                    coordinator.mediaCommand?(command)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(media.hasTrack ? media.displayTitle : "Nothing Playing")
+                        .font(.system(size: 13, weight: .semibold, design: .rounded))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    Text(media.artist)
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.56))
+                        .lineLimit(1)
                 }
-                .padding(.top, 1)
+
+                Spacer(minLength: 0)
+
+                Image(systemName: media.isPlaying ? "waveform" : "pause.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(media.accent.opacity(0.9))
+                    .contentTransition(.symbolEffect(.replace))
+                    .frame(width: 20)
             }
-            .frame(width: textWidth, alignment: .leading)
+
+            // `liveElapsed` reads the clock, but nothing publishes between helper events, so
+            // the body never re-ran and the bar sat frozen until the track changed. Tick just
+            // this subtree: 60 Hz drives the wave while playing, Reduce Motion returns to 2 Hz,
+            // and the schedule idles while paused.
+            TimelineView(.animation(
+                minimumInterval: reduceMotion ? 0.5 : 1.0 / 60.0,
+                paused: !media.isPlaying || !coordinator.effectsActive
+            )) { timeline in
+                Scrubber(
+                    progress: media.progress,
+                    elapsed: media.liveElapsed,
+                    duration: media.duration,
+                    tint: media.accent,
+                    isPlaying: media.isPlaying && coordinator.effectsActive,
+                    wavePhase: reduceMotion ? 0 : CGFloat(
+                        timeline.date.timeIntervalSinceReferenceDate
+                            .truncatingRemainder(
+                                dividingBy: Double(ScrubberBar.wavelength / ScrubberBar.waveSpeed)
+                            )
+                    ) * ScrubberBar.waveSpeed
+                ) { fraction in
+                    coordinator.mediaSeek?(fraction * media.duration)
+                }
+            }
+
+            TransportControls(isPlaying: media.isPlaying, tint: media.accent) { command in
+                coordinator.mediaCommand?(command)
+            }
         }
         .foregroundStyle(.white)
     }
@@ -149,7 +164,7 @@ struct ScrubberBar: View {
 
     /// Alcove's resting bar: 3pt, measured off the shipping app at 2x (6 device pixels).
     static let restHeight: CGFloat = 3
-    static let activeHeight: CGFloat = 5
+    static let activeHeight: CGFloat = 4
     static let waveHeight: CGFloat = 9
     static let waveAmplitude: CGFloat = 2
     static let wavelength: CGFloat = 10
@@ -222,49 +237,90 @@ struct SquigglyProgressShape: Shape {
 /// width — at ours it bunched all three into the middle third.
 struct TransportControls: View {
     let isPlaying: Bool
+    var tint: Color = .white
     var send: (MediaCommand) -> Void
 
     var body: some View {
         HStack(spacing: 0) {
-            TransportButton(symbol: "backward.fill", size: 13) { send(.previous) }
+            TransportButton(symbol: "backward.fill", size: 12) { send(.previous) }
             Spacer(minLength: 8)
-            TransportButton(symbol: isPlaying ? "pause.fill" : "play.fill", size: 17) {
+            TransportButton(
+                symbol: isPlaying ? "pause.fill" : "play.fill",
+                size: 15,
+                tint: tint,
+                primary: true
+            ) {
                 send(.togglePlayPause)
             }
             Spacer(minLength: 8)
-            TransportButton(symbol: "forward.fill", size: 13) { send(.next) }
+            TransportButton(symbol: "forward.fill", size: 12) { send(.next) }
         }
-        .padding(.horizontal, 9)
+        .padding(.horizontal, 30)
     }
 }
 
 private struct TransportButton: View {
     let symbol: String
     let size: CGFloat
+    var tint: Color = .white
+    var primary = false
     let action: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovering = false
-    @State private var pressed = false
 
     var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: size, weight: .medium))
-            .foregroundStyle(.white.opacity(hovering ? 1 : 0.82))
-            .contentTransition(.symbolEffect(.replace))
-            // Generous hit area without a visible frame — the icons stay small, the target doesn't.
-            .frame(width: size + 14, height: size + 10)
-            .contentShape(Rectangle())
-            .scaleEffect(pressed ? 0.86 : (hovering ? 1.08 : 1))
-            .animation(.interpolatingSpring(stiffness: 520, damping: 22), value: pressed)
-            .animation(.easeOut(duration: 0.12), value: hovering)
-            .onHover { hovering = $0 }
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in pressed = true }
-                    .onEnded { _ in
-                        pressed = false
-                        action()
-                    }
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: size, weight: .semibold))
+                .foregroundStyle(.white.opacity(hovering ? 1 : 0.88))
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: primary ? 34 : 30, height: 28)
+                .background {
+                    Capsule(style: .continuous)
+                        .fill(primary
+                              ? tint.opacity(hovering ? 0.62 : 0.5)
+                              : .white.opacity(hovering ? 0.11 : 0.055))
+                }
+                .overlay {
+                    Capsule(style: .continuous)
+                        .stroke(.white.opacity(hovering ? 0.18 : 0.1), lineWidth: 0.75)
+                }
+                .shadow(
+                    color: primary ? tint.opacity(hovering ? 0.3 : 0.2) : .clear,
+                    radius: hovering ? 6 : 4,
+                    y: 2
+                )
+        }
+        .buttonStyle(FluidButtonStyle(hovering: hovering))
+        .accessibilityLabel(accessibilityLabel)
+        .animation(
+            reduceMotion ? nil : .snappy(duration: 0.18, extraBounce: 0.02),
+            value: hovering
+        )
+        .onHover { hovering = $0 }
+    }
+
+    private var accessibilityLabel: String {
+        switch symbol {
+        case "backward.fill": return "Previous"
+        case "forward.fill": return "Next"
+        case "pause.fill": return "Pause"
+        default: return "Play"
+        }
+    }
+}
+
+private struct FluidButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let hovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.94 : (hovering ? 1.025 : 1))
+            .animation(
+                reduceMotion ? nil : .snappy(duration: 0.16, extraBounce: 0.02),
+                value: configuration.isPressed
             )
     }
 }

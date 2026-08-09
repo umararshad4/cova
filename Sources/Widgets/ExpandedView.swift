@@ -9,27 +9,40 @@ struct ExpandedView: View {
             // Clear the notch itself before any content starts.
             Color.clear.frame(height: coordinator.geometry.collapsedSize.height)
 
-            NowPlayingPanel(coordinator: coordinator, textWidth: 258)
+            NowPlayingPanel(coordinator: coordinator)
                 .padding(.horizontal, 16)
-                .padding(.top, 10)
+                .padding(.top, 8)
 
             Spacer(minLength: 0)
-
         }
-        .background(alignment: .top) {
-            // Album-art wash, the way Alcove tints the island to the current track.
-            if let media = coordinator.media, media.hasTrack {
+        .background {
+            ZStack {
+                if let media = coordinator.media, media.hasTrack {
+                    RadialGradient(
+                        colors: [media.accent.opacity(0.36), .clear],
+                        center: UnitPoint(x: 0.12, y: 0.48),
+                        startRadius: 0,
+                        endRadius: 230
+                    )
+                    .animation(.easeInOut(duration: 0.4), value: media.artworkData)
+                }
+
                 LinearGradient(
-                    colors: [media.accent.opacity(0.30), .clear],
+                    colors: [.white.opacity(0.055), .clear],
                     startPoint: .top,
-                    endPoint: .bottom
+                    endPoint: UnitPoint(x: 0.5, y: 0.58)
                 )
-                .frame(height: 110)
-                .blur(radius: 26)
-                .animation(.easeInOut(duration: 0.45), value: media.artworkData)
             }
         }
+        .overlay(alignment: .top) {
+            LinearGradient(
+                colors: [.clear, .white.opacity(0.18), .clear],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(height: 0.5)
+            .padding(.horizontal, 38)
+            .offset(y: coordinator.geometry.collapsedSize.height)
+        }
     }
-
 }
-
