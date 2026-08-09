@@ -67,7 +67,10 @@ final class BluetoothService {
         let key = device.addressString ?? name
 
         Task { @MainActor in
-            guard self.connected.insert(key).inserted else { return }
+            guard self.connected.insert(key).inserted else {
+                observer?.unregister()
+                return
+            }
             if let observer { self.disconnectObservers.append(observer) }
             self.emit(name: name, levels: levels, connected: true)
         }

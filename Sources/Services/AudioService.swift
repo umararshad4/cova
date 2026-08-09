@@ -61,6 +61,7 @@ final class AudioService {
     private func bindCurrentDevice() {
         let newDevice = Self.defaultOutputDevice()
         guard newDevice != device else { return }
+        removeDeviceListeners()
         device = newDevice
         guard device != AudioDeviceID(kAudioObjectUnknown) else { return }
 
@@ -77,6 +78,15 @@ final class AudioService {
                 listeners.append((device, address, block))
             }
         }
+    }
+
+    private func removeDeviceListeners() {
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        for (object, address, block) in listeners where object != system {
+            var addr = address
+            AudioObjectRemovePropertyListenerBlock(object, &addr, queue, block)
+        }
+        listeners.removeAll { $0.0 != system }
     }
 
     private func refresh(notify: Bool) {

@@ -59,6 +59,33 @@ func runSelfTests() {
     assert(displayHUDs == 1 && keyboardHUDs == 1,
            "each explicit brightness key must show only its matching HUD")
 
+    // --- Lifecycle: lock spaces must never survive sleep or a successful login ---
+    var lockLifecycle = LockLifecycleState()
+    lockLifecycle.apply(.locked)
+    assert(lockLifecycle.shouldPresent, "locking must present the lock-screen card")
+    lockLifecycle.apply(.willSleep)
+    assert(!lockLifecycle.shouldPresent, "sleep must tear down the private lock-screen space")
+    lockLifecycle.apply(.didWake(isLocked: true))
+    assert(lockLifecycle.shouldPresent, "wake may restore the card only when still locked")
+    lockLifecycle.apply(.sessionBecameActive(isLocked: false))
+    assert(!lockLifecycle.shouldPresent, "login must tear down the lock-screen card")
+
+    var runtime = RuntimePresentationState()
+    assert(!runtime.isHidden, "Tyland must be visible during a normal session")
+    runtime.isFullScreen = true
+    assert(runtime.isHidden && !runtime.effectsActive,
+           "fullscreen must hide Tyland and pause continuous effects")
+    runtime.isFullScreen = false
+    runtime.lifecycleSuppressed = true
+    assert(runtime.isHidden && !runtime.effectsActive,
+           "lock and sleep must hide Tyland and pause continuous effects")
+    assert(Private.hasActiveFullScreenSpace([
+        ["Current Space": ["type": 4]],
+    ]), "native fullscreen Spaces must be detected even when the menu bar stays visible")
+    assert(!Private.hasActiveFullScreenSpace([
+        ["Current Space": ["type": 0]],
+    ]), "a normal desktop Space must not hide Tyland")
+
     // --- Coordinator: panel must always contain the largest island ---
     let c = IslandCoordinator(geometry: g)
     assert(c.currentSize == g.collapsedSize, "must start collapsed")

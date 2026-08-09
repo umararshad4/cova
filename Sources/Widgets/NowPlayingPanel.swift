@@ -31,14 +31,14 @@ struct NowPlayingPanel: View {
                 // and the schedule idles while paused.
                 TimelineView(.animation(
                     minimumInterval: reduceMotion ? 0.5 : 1.0 / 60.0,
-                    paused: !media.isPlaying
+                    paused: !media.isPlaying || !coordinator.effectsActive
                 )) { timeline in
                     Scrubber(
                         progress: media.progress,
                         elapsed: media.liveElapsed,
                         duration: media.duration,
                         tint: media.accent,
-                        isPlaying: media.isPlaying,
+                        isPlaying: media.isPlaying && coordinator.effectsActive,
                         wavePhase: reduceMotion ? 0 : CGFloat(
                             timeline.date.timeIntervalSinceReferenceDate
                                 .truncatingRemainder(

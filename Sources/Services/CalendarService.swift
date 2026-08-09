@@ -14,6 +14,7 @@ final class CalendarService {
 
     private let store = EKEventStore()
     private var refreshTimer: Timer?
+    private var storeObserver: NSObjectProtocol?
 
     func start() {
         store.requestFullAccessToEvents { [weak self] granted, error in
@@ -31,11 +32,13 @@ final class CalendarService {
     func stop() {
         refreshTimer?.invalidate()
         refreshTimer = nil
-        NotificationCenter.default.removeObserver(self, name: .EKEventStoreChanged, object: store)
+        if let storeObserver { NotificationCenter.default.removeObserver(storeObserver) }
+        storeObserver = nil
     }
 
     private func observe() {
-        NotificationCenter.default.addObserver(
+        guard storeObserver == nil else { return }
+        storeObserver = NotificationCenter.default.addObserver(
             forName: .EKEventStoreChanged, object: store, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.refresh() }

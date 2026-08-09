@@ -42,7 +42,7 @@ struct IslandView: View {
                 .frame(width: size.width, height: size.height)
                 .overlay(alignment: .topTrailing) {
                     if coordinator.showsChargingAccessory {
-                        ChargingBolt()
+                        ChargingBolt(active: coordinator.effectsActive)
                             .padding(.top, 6)
                             .padding(.trailing, 12)
                     }
@@ -56,7 +56,8 @@ struct IslandView: View {
             HStack(spacing: 0) {
                 Color.clear.frame(width: IslandCoordinator.chargingAccessorySideWidth)
                 Color.clear.frame(width: coordinator.geometry.collapsedSize.width)
-                ChargingBolt().frame(width: IslandCoordinator.chargingAccessorySideWidth)
+                ChargingBolt(active: coordinator.effectsActive)
+                    .frame(width: IslandCoordinator.chargingAccessorySideWidth)
             }
             .frame(width: size.width, height: coordinator.geometry.collapsedSize.height)
             .transition(.opacity.combined(with: .scale(scale: 0.8, anchor: .trailing)))
@@ -82,7 +83,7 @@ struct CompactActivityView: View {
             trailing
                 .frame(width: activity.sideWidths.trailing)
             if coordinator.showsChargingAccessory {
-                ChargingBolt()
+                ChargingBolt(active: coordinator.effectsActive)
                     .frame(width: IslandCoordinator.chargingAccessorySideWidth)
                     .transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
@@ -95,7 +96,16 @@ struct CompactActivityView: View {
             if let style = particleStyle {
                 GeometryReader { geo in
                     ParticleEmitter(field: particles, tint: particleTint)
-                        .onAppear { particles.start(style: style, in: geo.size) }
+                        .onAppear {
+                            if coordinator.effectsActive { particles.start(style: style, in: geo.size) }
+                        }
+                        .onChange(of: coordinator.effectsActive) { _, active in
+                            if active {
+                                particles.start(style: style, in: geo.size)
+                            } else {
+                                particles.stop()
+                            }
+                        }
                         .onDisappear { particles.stop() }
                 }
             }
@@ -131,7 +141,7 @@ struct CompactActivityView: View {
         case .power(let event):
             symbol(powerSymbol(event), tint: powerTint(event))
         case .device(let device):
-            DeviceGlyph(device: device)
+            DeviceGlyph(device: device, effectsActive: coordinator.effectsActive)
         case .nowPlaying:
             Artwork(image: coordinator.media?.artwork)
         case .focus(_, let symbolName):
@@ -219,8 +229,8 @@ struct ChargingBolt: View {
     static let purple = Color(red: 0.68, green: 0.34, blue: 1)
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var pulsing = false
 
+    let active: Bool
     var size: CGFloat = 20
 
     var body: some View {
@@ -228,25 +238,18 @@ struct ChargingBolt: View {
             Image(systemName: "bolt.fill")
                 .font(.system(size: size * 0.62, weight: .bold))
                 .foregroundStyle(Self.purple)
-                .scaleEffect(pulsing ? 1.08 : 0.92)
-                .opacity(pulsing ? 1 : 0.82)
+                .symbolEffect(.pulse, options: .repeating, isActive: active && !reduceMotion)
 
             Image(systemName: "wave.3.right")
                 .font(.system(size: size * 0.42, weight: .semibold))
                 .foregroundStyle(Self.purple)
                 .offset(x: size * 0.43)
-                .scaleEffect(pulsing ? 1.12 : 0.72, anchor: .leading)
-                .opacity(pulsing ? 0.18 : 0.9)
+                .opacity(0.75)
+                .symbolEffect(.pulse, options: .repeating, isActive: active && !reduceMotion)
         }
         .frame(width: size, height: size)
         .shadow(color: Self.purple.opacity(0.65), radius: 5)
         .accessibilityLabel("Charging")
-        .onAppear { pulsing = !reduceMotion }
-        .onChange(of: reduceMotion) { _, reduced in pulsing = !reduced }
-        .animation(
-            reduceMotion ? nil : .easeInOut(duration: 0.95).repeatForever(autoreverses: true),
-            value: pulsing
-        )
     }
 }
 

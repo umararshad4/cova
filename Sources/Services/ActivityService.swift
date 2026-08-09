@@ -25,6 +25,9 @@ final class ActivityService {
     )
     private var micDevice = AudioDeviceID(kAudioObjectUnknown)
     private var cameraToken: Heartbeat.Token?
+    private var cameraCheckInFlight = false
+    private var cameraGeneration = 0
+    private var pollingEnabled = true
     private var cameraInUse = false
     private var screenWatched = false
     private let queue = DispatchQueue(label: "dev.local.tyland.activity")
@@ -51,8 +54,7 @@ final class ActivityService {
         }
         micListener = nil
 
-        if let cameraToken { Heartbeat.shared.cancel(cameraToken) }
-        cameraToken = nil
+        setPollingEnabled(false)
     }
 
     // MARK: - Focus
@@ -159,7 +161,20 @@ final class ActivityService {
 
     // MARK: - Camera
 
+    func setPollingEnabled(_ enabled: Bool) {
+        guard enabled != pollingEnabled || (enabled && cameraToken == nil) else { return }
+        pollingEnabled = enabled
+        cameraGeneration &+= 1
+        if enabled {
+            startCamera()
+        } else {
+            if let cameraToken { Heartbeat.shared.cancel(cameraToken) }
+            cameraToken = nil
+        }
+    }
+
     private func startCamera() {
+        guard pollingEnabled, cameraToken == nil else { return }
         // No notification exists for another app opening the camera, so this samples slowly.
         cameraToken = Heartbeat.shared.subscribe(.slow) { [weak self] in
             self?.checkCamera()
@@ -170,6 +185,7 @@ final class ActivityService {
     }
 
     private func checkScreenRecording() {
+        guard pollingEnabled else { return }
         guard Private.cgsIsScreenWatcherPresent != nil else { return }
         let watched = Private.screenIsBeingWatched
         guard watched != screenWatched else { return }
@@ -178,17 +194,29 @@ final class ActivityService {
     }
 
     private func checkCamera() {
+        guard pollingEnabled, !cameraCheckInFlight else { return }
+        cameraCheckInFlight = true
+        let generation = cameraGeneration
         // `DiscoverySession` blocks on the Camera consent prompt. On the main thread that stalls the
         // main actor, which starves *every* Swift Task in the app — weather fetches, deferred
         // service starts, the lot. Keep it on a utility queue and hop back with the answer.
-        Task.detached(priority: .utility) {
+        Task.detached(priority: .utility) { [weak self] in
             let inUse = AVCaptureDevice.DiscoverySession(
                 deviceTypes: [.builtInWideAngleCamera, .external],
                 mediaType: .video,
                 position: .unspecified
             ).devices.contains { $0.isInUseByAnotherApplication }
-            await MainActor.run { self.applyCamera(inUse) }
+            await self?.finishCamera(inUse, generation: generation)
         }
+    }
+
+    private func finishCamera(_ inUse: Bool, generation: Int) {
+        cameraCheckInFlight = false
+        guard pollingEnabled, generation == cameraGeneration else {
+            if pollingEnabled { checkCamera() }
+            return
+        }
+        applyCamera(inUse)
     }
 
     private func applyCamera(_ inUse: Bool) {

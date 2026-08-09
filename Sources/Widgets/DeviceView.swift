@@ -65,8 +65,8 @@ struct DeviceGlyph: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let device: DeviceEvent
+    let effectsActive: Bool
     @State private var shown = false
-    @State private var waves = false
 
     var body: some View {
         ZStack {
@@ -74,8 +74,12 @@ struct DeviceGlyph: View {
                 Image(systemName: "antenna.radiowaves.left.and.right")
                     .font(.system(size: 22, weight: .medium))
                     .foregroundStyle(Self.connectedTint)
-                    .scaleEffect(waves ? 1.18 : 0.68)
-                    .opacity(waves ? 0.08 : 0.75)
+                    .opacity(0.75)
+                    .symbolEffect(
+                        .pulse,
+                        options: .repeating,
+                        isActive: effectsActive && !reduceMotion
+                    )
             }
 
             Image(systemName: device.symbol)
@@ -95,13 +99,7 @@ struct DeviceGlyph: View {
             } else {
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) { shown = true }
             }
-            waves = !reduceMotion
         }
-        .onChange(of: reduceMotion) { _, reduced in waves = !reduced }
-        .animation(
-            reduceMotion ? nil : .easeOut(duration: 1).repeatForever(autoreverses: false),
-            value: waves
-        )
     }
 }
 

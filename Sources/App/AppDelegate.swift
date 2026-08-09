@@ -1,6 +1,15 @@
 import AppKit
 import SwiftUI
 
+struct RuntimePresentationState {
+    var lifecycleSuppressed = false
+    var isFullScreen = false
+    var hidesInFullScreen = true
+
+    var isHidden: Bool { lifecycleSuppressed || (hidesInFullScreen && isFullScreen) }
+    var effectsActive: Bool { !isHidden }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var coordinator: IslandCoordinator?
@@ -22,17 +31,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let sound = SoundService()
     private let downloads = DownloadsService()
     private let routes = RouteService()
+    private var runtime = RuntimePresentationState()
+    private var presentationObservation: NSKeyValueObservation?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installStatusItem()
         buildPanel()
         startServices()
+        runtime.hidesInFullScreen = settings.hideWhileInFullscreen
 
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(screensChanged),
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(settingsChanged),
+            name: UserDefaults.didChangeNotification,
+            object: UserDefaults.standard
         )
         for name in [
             NSWorkspace.didActivateApplicationNotification,
@@ -41,6 +59,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSWorkspace.shared.notificationCenter.addObserver(
                 self, selector: #selector(activeAppChanged), name: name, object: nil
             )
+        }
+        presentationObservation = NSApp.observe(
+            \.currentSystemPresentationOptions,
+            options: [.initial, .new]
+        ) { [weak self] _, _ in
+            Task { @MainActor [weak self] in self?.refreshPresentation() }
         }
     }
 
@@ -58,6 +82,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sound.stop()
         downloads.stop()
         routes.stop()
+        presentationObservation?.invalidate()
+        presentationObservation = nil
+        NotificationCenter.default.removeObserver(self)
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 
     private func buildPanel() {
@@ -134,14 +162,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 coordinator.withdraw(slot: "nowPlaying")
             }
-            // Only tap the audio device while something is actually playing — an idle tap keeps
-            // the audio engine awake for nothing.
-            if state.isPlaying, self?.settings.showWaveform == true {
-                self?.tap.start()
-            } else {
-                self?.tap.stop()
-                coordinator.levelStore.levels = []
-            }
+            self?.reconcileAudioTap()
         }
         coordinator.mediaCommand = { [weak self] command in
             self?.media.send(command)
@@ -158,6 +179,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         Debug.log("starting lock screen")
         let lockScreen = LockScreenController(coordinator: coordinator)
+        lockScreen.onSuppressionChange = { [weak self] suppressed in
+            self?.runtime.lifecycleSuppressed = suppressed
+            self?.reconcileRuntime()
+        }
         lockScreen.start()
         self.lockScreen = lockScreen
 
@@ -254,19 +279,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindow = window
     }
 
-    /// In full screen the menu bar auto-hides, so the visible frame grows to the full screen frame.
-    private var isFullScreen: Bool {
-        guard let screen = NSScreen.main else { return false }
-        return screen.visibleFrame.height >= screen.frame.height
+    @objc private func activeAppChanged() {
+        refreshPresentation()
     }
 
-    @objc private func activeAppChanged() {
-        guard settings.hideWhileInFullscreen else {
-            panel?.setVisible(true)
-            return
+    @objc private func settingsChanged() {
+        refreshPresentation()
+    }
+
+    private func refreshPresentation() {
+        runtime.isFullScreen = Private.activeSpaceIsFullScreen
+            ?? NSApp.currentSystemPresentationOptions.contains(.fullScreen)
+        runtime.hidesInFullScreen = settings.hideWhileInFullscreen
+        reconcileRuntime()
+    }
+
+    private func reconcileRuntime() {
+        guard let coordinator else { return }
+        if runtime.isHidden { coordinator.collapse() }
+        coordinator.effectsActive = runtime.effectsActive
+        panel?.setVisible(!runtime.isHidden)
+        if !Self.skip("activities") {
+            activities.setPollingEnabled(runtime.effectsActive)
         }
-        Debug.log("activeAppChanged: fullscreen=\(isFullScreen) -> visible=\(!isFullScreen)")
-        panel?.setVisible(!isFullScreen)
+        reconcileAudioTap()
+        Debug.log(
+            "runtime: hidden=\(runtime.isHidden) fullscreen=\(runtime.isFullScreen) "
+                + "suppressed=\(runtime.lifecycleSuppressed)"
+        )
+    }
+
+    private func reconcileAudioTap() {
+        guard let coordinator else { return }
+        if runtime.effectsActive, media.state.isPlaying, settings.showWaveform {
+            tap.start()
+        } else {
+            tap.stop()
+            coordinator.levelStore.levels = []
+        }
     }
 
     @objc private func screensChanged() {

@@ -29,8 +29,10 @@ final class AudioTapService {
     private var smoothed = [Float](repeating: 0, count: 4)
 
     private var starting = false
+    private var desiredRunning = false
 
     func start() {
+        desiredRunning = true
         guard !running, !starting else { return }
         guard #available(macOS 14.4, *) else {
             Debug.log("audio tap needs macOS 14.4+")
@@ -65,6 +67,10 @@ final class AudioTapService {
     private func finishStart(ok: Bool) {
         starting = false
         guard ok else { return }
+        guard desiredRunning else {
+            teardown()
+            return
+        }
         AudioDeviceStart(aggregateID, procID)
         let timer = Timer(timeInterval: 1.0 / 20.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.drain() }
@@ -76,6 +82,8 @@ final class AudioTapService {
     }
 
     func stop() {
+        desiredRunning = false
+        guard !starting else { return }
         guard running else { return }
         AudioDeviceStop(aggregateID, procID)
         publishTimer?.invalidate()

@@ -63,6 +63,7 @@ enum Private {
     )
 
     typealias MainConnectionID = @convention(c) () -> Int32
+    typealias CopyManagedDisplaySpaces = @convention(c) (Int32) -> Unmanaged<CFArray>?
     /// `SLSSpaceCreate(cid, 1, 0)`. The second argument really is the literal 1 — passing nil
     /// returns 0 on every macOS tested, which is the bug that made lock-screen widgets silently
     /// never appear.
@@ -76,6 +77,9 @@ enum Private {
     static let cgsMainConnectionID =
         symbol(skyLight, "SLSMainConnectionID", as: MainConnectionID.self)
         ?? symbol(skyLight, "CGSMainConnectionID", as: MainConnectionID.self)
+    private static let cgsCopyManagedDisplaySpaces =
+        symbol(skyLight, "SLSCopyManagedDisplaySpaces", as: CopyManagedDisplaySpaces.self)
+        ?? symbol(skyLight, "CGSCopyManagedDisplaySpaces", as: CopyManagedDisplaySpaces.self)
     static let cgsSpaceCreate =
         symbol(skyLight, "SLSSpaceCreate", as: SpaceCreate.self)
         ?? symbol(skyLight, "CGSSpaceCreate", as: SpaceCreate.self)
@@ -97,6 +101,24 @@ enum Private {
     static let cgsHideSpaces =
         symbol(skyLight, "SLSHideSpaces", as: ShowHideSpaces.self)
         ?? symbol(skyLight, "CGSHideSpaces", as: ShowHideSpaces.self)
+
+    static func hasActiveFullScreenSpace(_ displays: [[String: Any]]) -> Bool {
+        displays.contains { display in
+            guard let current = display["Current Space"] as? [String: Any] else { return false }
+            return current["type"] as? Int == 4
+        }
+    }
+
+    /// Native fullscreen windows live in a dedicated Space even when the user's menu bar setting
+    /// leaves `currentSystemPresentationOptions` at `.default`. This uses the same optional
+    /// SkyLight lookup as the lock-screen feature and falls back cleanly if Apple removes it.
+    static var activeSpaceIsFullScreen: Bool? {
+        guard let mainConnection = cgsMainConnectionID,
+              let copySpaces = cgsCopyManagedDisplaySpaces,
+              let displays = copySpaces(mainConnection())?.takeRetainedValue() as? [[String: Any]]
+        else { return nil }
+        return hasActiveFullScreenSpace(displays)
+    }
 
     // MARK: - Screen capture detection
 

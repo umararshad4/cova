@@ -1,6 +1,36 @@
 import AppKit
 import SwiftUI
 
+struct LockLifecycleState {
+    enum Event {
+        case locked
+        case unlocked
+        case willSleep
+        case didWake(isLocked: Bool)
+        case sessionBecameActive(isLocked: Bool)
+    }
+
+    private(set) var isLocked = false
+    private(set) var isSleeping = false
+
+    var shouldPresent: Bool { isLocked && !isSleeping }
+    var suppressesMainPanel: Bool { isLocked || isSleeping }
+
+    mutating func apply(_ event: Event) {
+        switch event {
+        case .locked:
+            isLocked = true
+        case .unlocked:
+            isLocked = false
+        case .willSleep:
+            isSleeping = true
+        case let .didWake(isLocked), let .sessionBecameActive(isLocked):
+            isSleeping = false
+            self.isLocked = isLocked
+        }
+    }
+}
+
 /// Renders the island on the login window by parking a panel in a private, high-level CGS Space —
 /// the same technique the shipping Alcove uses (`CGSSpaceCreate`, `CGSSpaceSetAbsoluteLevel`,
 /// `CGSAddWindowsToSpaces`, `CGSShowSpaces`).
@@ -24,8 +54,12 @@ final class LockScreenController {
     private var space: UInt64 = 0
     private var connection: Int32 = 0
     private var watchdog: Task<Void, Never>?
+    private var pollToken: Heartbeat.Token?
+    private var lifecycle = LockLifecycleState()
 
     private let coordinator: IslandCoordinator
+
+    var onSuppressionChange: ((Bool) -> Void)?
 
     var isEnabled: Bool { UserDefaults.standard.bool(forKey: "lockScreenEnabled") }
 
@@ -59,13 +93,10 @@ final class LockScreenController {
     }
 
     func start() {
-        guard isEnabled else {
+        if !isEnabled {
             Debug.log("lock screen: disabled (set lockScreenEnabled to enable)")
-            return
-        }
-        guard symbolsAvailable else {
+        } else if !symbolsAvailable {
             Debug.log("lock screen: private symbols unavailable, staying off")
-            return
         }
 
         let center = DistributedNotificationCenter.default()
@@ -77,6 +108,27 @@ final class LockScreenController {
             name: NSNotification.Name("com.apple.screenIsLocked"), object: nil,
             suspensionBehavior: .deliverImmediately
         )
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
+        for name in [
+            NSWorkspace.willSleepNotification,
+            NSWorkspace.screensDidSleepNotification,
+            NSWorkspace.sessionDidResignActiveNotification,
+        ] {
+            workspaceCenter.addObserver(
+                self, selector: #selector(systemWillSleep), name: name, object: nil
+            )
+        }
+        for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification] {
+            workspaceCenter.addObserver(
+                self, selector: #selector(systemDidWake), name: name, object: nil
+            )
+        }
+        workspaceCenter.addObserver(
+            self,
+            selector: #selector(sessionBecameActive),
+            name: NSWorkspace.sessionDidBecomeActiveNotification,
+            object: nil
+        )
         center.addObserver(
             self, selector: #selector(screenUnlocked),
             name: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil,
@@ -87,6 +139,8 @@ final class LockScreenController {
         pollToken = Heartbeat.shared.subscribe(.slow) { [weak self] in self?.pollLockState() }
 
         Debug.log("lock screen: armed")
+        lifecycle.apply(.didWake(isLocked: Private.screenIsLocked))
+        reconcile()
 
         // Diagnostic: present immediately without locking, then tear down.
         //   defaults write dev.local.tyland debugPresentLockScreen -bool YES
@@ -100,24 +154,18 @@ final class LockScreenController {
         }
     }
 
-    private var pollToken: Heartbeat.Token?
-    private var wasLocked = false
-
     private func pollLockState() {
+        guard !lifecycle.isSleeping else { return }
         let locked = Private.screenIsLocked
-        guard locked != wasLocked else { return }
-        wasLocked = locked
+        guard locked != lifecycle.isLocked else { return }
         Debug.log("lock screen: state changed, locked=\(locked)")
-        if locked {
-            present()
-            startWatchdog()
-        } else {
-            teardown()
-        }
+        lifecycle.apply(locked ? .locked : .unlocked)
+        reconcile()
     }
 
     func stop() {
         DistributedNotificationCenter.default().removeObserver(self)
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
         if let pollToken { Heartbeat.shared.cancel(pollToken) }
         pollToken = nil
         teardown()
@@ -126,19 +174,45 @@ final class LockScreenController {
     // MARK: - Lock cycle
 
     @objc private func screenLocked() {
-        guard isEnabled else { return }
-        wasLocked = true
+        lifecycle.apply(.locked)
+        reconcile()
+    }
+
+    @objc private func screenUnlocked() {
+        lifecycle.apply(.unlocked)
+        reconcile()
+    }
+
+    @objc private func systemWillSleep() {
+        lifecycle.apply(.willSleep)
+        reconcile()
+    }
+
+    @objc private func systemDidWake() {
+        lifecycle.apply(.didWake(isLocked: Private.screenIsLocked))
+        reconcile()
+    }
+
+    @objc private func sessionBecameActive() {
+        lifecycle.apply(.sessionBecameActive(isLocked: Private.screenIsLocked))
+        reconcile()
+    }
+
+    private func reconcile() {
+        onSuppressionChange?(lifecycle.suppressesMainPanel)
+        guard lifecycle.shouldPresent else {
+            teardown()
+            return
+        }
+        guard isEnabled, symbolsAvailable else { return }
         present()
         startWatchdog()
     }
 
-    @objc private func screenUnlocked() {
-        wasLocked = false
-        teardown()
-    }
-
     private func present() {
         guard panel == nil,
+              isEnabled,
+              symbolsAvailable,
               let screen = NSScreen.main,
               let mainConnection = Private.cgsMainConnectionID,
               let spaceCreate = Private.cgsSpaceCreate,
@@ -185,6 +259,8 @@ final class LockScreenController {
         guard space != 0 else {
             Debug.log("lock screen: space creation failed")
             panel.orderOut(nil)
+            panel.close()
+            connection = 0
             return
         }
 
@@ -209,7 +285,9 @@ final class LockScreenController {
         }
 
         panel?.orderOut(nil)
+        panel?.close()
         panel = nil
+        connection = 0
     }
 
     /// Belt and braces: if the unlock notification never lands, poll the session state and tear
@@ -222,7 +300,8 @@ final class LockScreenController {
                 guard let self else { return }
                 if !Private.screenIsLocked {
                     Debug.log("lock screen: watchdog tore down a stale space")
-                    self.teardown()
+                    self.lifecycle.apply(.unlocked)
+                    self.reconcile()
                     return
                 }
             }
