@@ -11,7 +11,8 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 APP="$ROOT/build/Tyland.app"
 STAGE="$ROOT/build/dmg"
 DMG="$ROOT/build/Tyland.dmg"
-RAW="$ROOT/build/Tyland.raw.dmg"
+RAW="$ROOT/build/Tyland.raw"
+RAW_IMAGE="$RAW.iso"
 ZIP="$ROOT/build/Tyland.zip"
 
 VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$ROOT/Resources/Info.plist" 2>/dev/null || echo "0.1.0")
@@ -31,7 +32,7 @@ ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 echo "built $ZIP ($(du -h "$ZIP" | cut -f1))"
 
 # --- DMG, best effort -------------------------------------------------------
-rm -rf "$STAGE" "$DMG" "$RAW"
+rm -rf "$STAGE" "$DMG" "$RAW" "$RAW_IMAGE"
 mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
@@ -57,14 +58,16 @@ run_with_timeout() {
   wait "$pid"
 }
 
+# A pure UDF image preserves code signatures. HFS adds FinderInfo xattrs to nested executables,
+# which makes `codesign --verify` reject an otherwise valid app after mounting the DMG.
 # makehybrid + convert never attach a volume, unlike `hdiutil create -srcfolder`.
-if run_with_timeout 120 hdiutil makehybrid -hfs -hfs-volume-name "Tyland $VERSION" \
+if run_with_timeout 120 hdiutil makehybrid -udf -udf-volume-name "Tyland $VERSION" \
      -o "$RAW" "$STAGE" -quiet 2>/dev/null \
-   && run_with_timeout 120 hdiutil convert "$RAW" -format UDZO -o "$DMG" -quiet 2>/dev/null; then
-  rm -f "$RAW"
+   && run_with_timeout 120 hdiutil convert "$RAW_IMAGE" -format UDZO -o "$DMG" -quiet 2>/dev/null; then
+  rm -f "$RAW_IMAGE"
   echo "built $DMG ($(du -h "$DMG" | cut -f1))"
 else
-  rm -f "$DMG" "$RAW"
+  rm -f "$DMG" "$RAW" "$RAW_IMAGE"
   echo "hdiutil unavailable or hung — skipped the DMG. Install from $ZIP instead." >&2
 fi
 
