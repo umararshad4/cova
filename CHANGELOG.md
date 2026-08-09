@@ -5,6 +5,13 @@ Every version here has a matching GitHub release with a `Tyland.dmg` attached.
 
 <!-- next -->
 
+## v0.3.2 — 2026-08-09
+
+### Fixes
+
+- preserve app signatures in dmg (719890f)
+
+
 ## v0.3.1 — 2026-08-09
 
 ### Fixes
