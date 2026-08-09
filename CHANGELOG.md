@@ -5,6 +5,13 @@ Every version here has a matching GitHub release with a `Tyland.dmg` attached.
 
 <!-- next -->
 
+## v0.3.1 — 2026-08-09
+
+### Fixes
+
+- suspend hidden Tyland work (410b1e0)
+
+
 ## v0.3.0 — 2026-08-09
 
 ### Features
