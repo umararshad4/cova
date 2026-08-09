@@ -5,6 +5,13 @@ Every version here has a matching GitHub release with a `Tyland.dmg` attached.
 
 <!-- next -->
 
+## v0.3.0 — 2026-08-09
+
+### Features
+
+- refine notch status indicators (35b334d)
+
+
 ## v0.2.2 — 2026-08-09
 
 ### Fixes
