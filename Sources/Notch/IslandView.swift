@@ -148,8 +148,8 @@ struct CompactActivityView: View {
             symbol(symbolName, tint: .indigo)
         case .recording(let kind):
             symbol(kind.symbol, tint: kind.tint)
-        case .download:
-            symbol("arrow.down.circle.fill", tint: .blue)
+        case .download(let progress):
+            DownloadProgressGlyph(progress: progress, diameter: 23)
         case .route(let estimate):
             symbol("car.fill", tint: estimate.isUrgent ? .orange : .white)
         }
@@ -178,9 +178,10 @@ struct CompactActivityView: View {
                 .lineLimit(1)
         case .recording:
             EmptyView()
-        case .download(let count):
-            Text(count == 1 ? "Downloading" : "\(count) files")
-                .font(.system(size: 10, weight: .medium))
+        case .download(let progress):
+            Text(progress.compactLabel)
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
         case .route(let estimate):

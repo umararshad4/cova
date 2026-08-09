@@ -236,6 +236,9 @@ final class LockScreenController {
         panel.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         let host = LockScreenHostingView(rootView: LockScreenView(coordinator: coordinator))
+        host.controlsVisible = { [weak self] in
+            self?.coordinator.media?.hasTrack == true
+        }
         panel.contentView = host
 
         let size = Self.panelSize(for: coordinator)
@@ -322,65 +325,117 @@ struct LockScreenView: View {
     var body: some View {
         Group {
             if let media {
-                HStack(spacing: 12) {
-                    Artwork(image: media.artwork, size: 52, cornerRadius: 10)
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(media.displayTitle)
-                            .font(.system(size: 13, weight: .semibold))
-                            .lineLimit(1)
-                        Text(media.artist)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.6))
-                            .lineLimit(1)
-
-                        // Display only — seeking by drag on the login window is not worth the
-                        // extra interactive surface. Ticked for the same reason as the island scrubber — `progress` is
-                        // extrapolated from a clock, so the bar needs a repaint to advance.
-                        TimelineView(.animation(minimumInterval: 0.5, paused: !media.isPlaying)) { _ in
-                            GeometryReader { geo in
-                                ZStack(alignment: .leading) {
-                                    Capsule().fill(.white.opacity(0.18))
-                                    Capsule().fill(media.accent)
-                                        .frame(width: max(0, geo.size.width * media.progress))
-                                }
-                            }
-                        }
-                        .frame(height: 3)
-                        .padding(.top, 3)
-                    }
-
-                    HStack(spacing: 14) {
-                        LockButton(symbol: "backward.fill", size: 13) {
-                            coordinator.mediaCommand?(.previous)
-                        }
-                        LockButton(symbol: media.isPlaying ? "pause.fill" : "play.fill", size: 17) {
-                            coordinator.mediaCommand?(.togglePlayPause)
-                        }
-                        LockButton(symbol: "forward.fill", size: 13) {
-                            coordinator.mediaCommand?(.next)
-                        }
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
-                .background {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(.black.opacity(0.55))
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(
-                                LinearGradient(colors: [media.accent.opacity(0.35), .clear],
-                                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                            )
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .strokeBorder(.white.opacity(0.12), lineWidth: 0.5)
-                    }
-                }
+                mediaCard(media)
+            } else if let download = coordinator.download {
+                downloadCard(download)
             }
         }
         .foregroundStyle(.white)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func mediaCard(_ media: MediaState) -> some View {
+        HStack(spacing: 12) {
+            Artwork(image: media.artwork, size: 52, cornerRadius: 10)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(media.displayTitle)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                Text(media.artist)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .lineLimit(1)
+
+                // Display only — seeking by drag on the login window is not worth the extra
+                // interactive surface. The clock-driven value still needs periodic repaints.
+                TimelineView(.animation(minimumInterval: 0.5, paused: !media.isPlaying)) { _ in
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(.white.opacity(0.18))
+                            Capsule().fill(media.accent)
+                                .frame(width: max(0, geo.size.width * media.progress))
+                        }
+                    }
+                }
+                .frame(height: 3)
+                .padding(.top, 2)
+
+                if let download = coordinator.download {
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.down")
+                            .foregroundStyle(.blue)
+                        DownloadProgressBar(progress: download)
+                            .frame(height: 2.5)
+                        Text(download.compactLabel)
+                            .monospacedDigit()
+                    }
+                    .font(.system(size: 8, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.78))
+                }
+            }
+
+            HStack(spacing: 14) {
+                LockButton(symbol: "backward.fill", size: 13) {
+                    coordinator.mediaCommand?(.previous)
+                }
+                LockButton(symbol: media.isPlaying ? "pause.fill" : "play.fill", size: 17) {
+                    coordinator.mediaCommand?(.togglePlayPause)
+                }
+                LockButton(symbol: "forward.fill", size: 13) {
+                    coordinator.mediaCommand?(.next)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background { LockCardBackground(tint: media.accent) }
+    }
+
+    private func downloadCard(_ download: DownloadProgress) -> some View {
+        HStack(spacing: 12) {
+            DownloadProgressGlyph(progress: download, diameter: 42)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(download.count == 1 ? "Downloading" : "Downloading \(download.count) files")
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .lineLimit(1)
+                Text(download.summaryLabel)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .lineLimit(1)
+                DownloadProgressBar(progress: download)
+                    .frame(height: 3)
+            }
+
+            Text(download.compactLabel)
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .background { LockCardBackground(tint: .blue) }
+    }
+}
+
+private struct LockCardBackground: View {
+    let tint: Color
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(.black.opacity(0.55))
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [tint.opacity(0.35), .clear],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(.white.opacity(0.12), lineWidth: 0.5)
+        }
     }
 }
 
@@ -391,7 +446,10 @@ struct LockScreenView: View {
 /// hit for any interactive SwiftUI content, so testing `hit === self` would have rejected the
 /// buttons too and left them dead.
 private final class LockScreenHostingView<Content: View>: NSHostingView<Content> {
+    var controlsVisible: () -> Bool = { true }
+
     override func hitTest(_ point: NSPoint) -> NSView? {
+        guard controlsVisible() else { return nil }
         // Width of the trailing strip the transport row occupies, plus a little slack.
         // A `static let` is not allowed on a generic type, so it lives here.
         let controlsWidth: CGFloat = 140

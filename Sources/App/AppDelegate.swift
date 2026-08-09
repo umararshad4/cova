@@ -223,9 +223,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         Debug.log("starting activities"); if !Self.skip("activities") { activities.start() }
 
-        downloads.onProgress = { count in
-            if count > 0 {
-                coordinator.push(.download(count: count))
+        downloads.onProgress = { progress in
+            coordinator.download = progress.count > 0 ? progress : nil
+            if progress.count > 0 {
+                coordinator.push(.download(progress))
             } else {
                 coordinator.withdraw(slot: "download")
             }

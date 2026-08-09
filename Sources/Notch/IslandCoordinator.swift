@@ -21,6 +21,7 @@ final class IslandCoordinator: ObservableObject {
     @Published var battery: BatteryService.State?
     @Published var events: [CalendarEvent] = []
     @Published var device: DeviceEvent?
+    @Published var download: DownloadProgress?
     @Published var effectsActive = true
 
 

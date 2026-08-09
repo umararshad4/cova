@@ -245,6 +245,22 @@ func runSelfTests() {
     assert(DownloadsService.partialExtensions.contains("crdownload"), "chrome partials")
     assert(!DownloadsService.partialExtensions.contains("zip"), "a finished zip is not a download")
 
+    let downloadFixture = FileManager.default.temporaryDirectory
+        .appendingPathComponent("tyland-download-self-test-\(UUID().uuidString)")
+    try! FileManager.default.createDirectory(at: downloadFixture, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: downloadFixture) }
+    FileManager.default.createFile(
+        atPath: downloadFixture.appendingPathComponent("sample.crdownload").path,
+        contents: Data(repeating: 0, count: 2_048)
+    )
+    let knownDownload = DownloadsService.snapshot(in: downloadFixture, totalBytes: 4_096)
+    assert(knownDownload.count == 1 && knownDownload.receivedBytes == 2_048,
+           "download snapshot must report the live placeholder size")
+    assert(knownDownload.fraction == 0.5, "known download total must produce real progress")
+    let unknownDownload = DownloadsService.snapshot(in: downloadFixture)
+    assert(unknownDownload.fraction == nil,
+           "missing browser total must remain indeterminate, never invent a percentage")
+
     // --- Battery ring thresholds ---
     assert(BatteryRing.tint(for: 90) == .green, "high battery green")
     assert(BatteryRing.tint(for: 35) == .yellow, "middling battery yellow")

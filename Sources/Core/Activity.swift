@@ -1,5 +1,16 @@
 import SwiftUI
 
+struct DownloadProgress: Equatable {
+    let count: Int
+    let receivedBytes: Int64
+    let totalBytes: Int64?
+
+    var fraction: Double? {
+        guard count == 1, let totalBytes, totalBytes > 0 else { return nil }
+        return min(max(Double(receivedBytes) / Double(totalBytes), 0), 1)
+    }
+}
+
 /// Something worth showing in the island. Transient ones (a volume nudge) expire; live ones
 /// (music playing, a Focus mode) stay until their service withdraws them.
 enum Activity: Equatable {
@@ -11,7 +22,7 @@ enum Activity: Equatable {
     case nowPlaying
     case focus(name: String, symbol: String)
     case recording(RecordingKind)
-    case download(count: Int)
+    case download(DownloadProgress)
     case route(RouteEstimate)
 
     /// Higher wins. A volume nudge interrupts music; music resumes when the nudge expires.
@@ -50,7 +61,7 @@ enum Activity: Equatable {
         case .nowPlaying: return (34, 46)
         case .focus: return (34, 42)
         case .recording: return (30, 34)
-        case .download: return (32, 56)
+        case .download(let progress): return (34, progress.fraction == nil ? 68 : 50)
         case .route: return (32, 78)
         }
     }
