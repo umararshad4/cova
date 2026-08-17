@@ -45,8 +45,16 @@ private struct ArtworkTracker {
     private var artwork: Data?
 
     mutating func encodedArtwork(trackKey: String, artwork: Data?, force: Bool = false) -> String? {
-        let shouldEmit = force || trackKey != self.trackKey || artwork != self.artwork
+        let trackChanged = trackKey != self.trackKey
         self.trackKey = trackKey
+        // mediaremoted leaves ArtworkData out of most refreshes. Measured on Spotify: the same
+        // track alternates between the full JPEG and no artwork key every couple of notifications,
+        // and a transport command fires three to five of them at once. Reporting every gap as "no
+        // artwork" is what made the island blink its cover, its accent colour and its background
+        // wash two or three times on every button press. Absent means unchanged; only a new track
+        // may clear the art.
+        guard artwork != nil || trackChanged else { return nil }
+        let shouldEmit = force || trackChanged || artwork != self.artwork
         self.artwork = artwork
         guard shouldEmit else { return nil }
         return artwork?.base64EncodedString() ?? ""
@@ -184,6 +192,13 @@ if CommandLine.arguments.contains("artwork-test") {
     _ = tracker.encodedArtwork(trackKey: "video", artwork: nil, force: true)
     assert(tracker.encodedArtwork(trackKey: "video", artwork: cover) == cover.base64EncodedString(),
            "artwork arriving after metadata must be emitted")
+    // The flicker: mediaremoted omits the artwork from most refreshes of the same track.
+    assert(tracker.encodedArtwork(trackKey: "video", artwork: nil) == nil,
+           "a refresh without artwork must not clear the cover mid-track")
+    assert(tracker.encodedArtwork(trackKey: "video", artwork: cover) == nil,
+           "the cover coming back must not repaint either — it never went away")
+    assert(tracker.encodedArtwork(trackKey: "other", artwork: nil) == "",
+           "a new track with no artwork must clear the previous cover")
     print("artwork test passed")
     exit(0)
 }
