@@ -5,6 +5,15 @@ Every version here has a matching GitHub release with a `Tyland.dmg` attached.
 
 <!-- next -->
 
+## v0.4.2 — 2026-08-17
+
+### Fixes
+
+- sweep the progress bar instead of stepping it (1bfb64f)
+- recover an island that latched off on one Space (b265907)
+- stop the island blinking on every transport tap (257f0cd)
+
+
 ## v0.4.1 — 2026-08-09
 
 ### Fixes
