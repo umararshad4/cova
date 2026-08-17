@@ -26,6 +26,10 @@ final class DownloadsService {
     /// Safari, Chrome/Edge, Firefox respectively.
     nonisolated static let partialExtensions: Set<String> = ["download", "crdownload", "part"]
 
+    /// How often an in-flight download is re-measured. The progress views ramp between samples over
+    /// exactly this long, so the bar sweeps instead of stepping; keep the two in step if it changes.
+    nonisolated static let sampleInterval: TimeInterval = 0.5
+
     private var downloadsURL: URL {
         directoryURL ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Downloads")
@@ -80,7 +84,10 @@ final class DownloadsService {
         descriptor = -1
     }
 
-    private func scan(silent: Bool = false) {
+    /// `coalesce` is for filesystem events, which arrive in bursts. The poll is already paced, and
+    /// making it wait too turned a 500 ms beat into a ragged 750 ms one — visible as a bar that
+    /// lurches. Its samples go straight through.
+    private func scan(silent: Bool = false, coalesce: Bool = true) {
         // File-extension events can arrive continuously. One scan per 250 ms is enough for a
         // glanceable HUD and prevents a large download from flooding SwiftUI with repaints.
         guard scanTask == nil else { return }
@@ -90,7 +97,7 @@ final class DownloadsService {
         let lookupDue = Date().timeIntervalSince(lastTotalLookup) >= 10
 
         scanTask = Task { [weak self] in
-            if !silent { try? await Task.sleep(for: .milliseconds(250)) }
+            if coalesce, !silent { try? await Task.sleep(for: .milliseconds(250)) }
             guard !Task.isCancelled else { self?.scanTask = nil; return }
 
             let result = await Task.detached(priority: .utility) {
@@ -147,10 +154,10 @@ final class DownloadsService {
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                do { try await Task.sleep(for: .milliseconds(500)) }
+                do { try await Task.sleep(for: .seconds(Self.sampleInterval)) }
                 catch { break }
                 guard let self else { break }
-                self.scan()
+                self.scan(coalesce: false)
             }
         }
     }

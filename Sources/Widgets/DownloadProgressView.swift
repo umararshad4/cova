@@ -36,7 +36,11 @@ struct DownloadProgressGlyph: View {
                     .trim(from: 0, to: fraction)
                     .stroke(tint, style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                    .animation(.easeOut(duration: 0.22), value: fraction)
+                    // Progress arrives as a sample every `sampleInterval`. Easing over a fifth of
+                    // that spent most of the gap frozen — the ring jumped, waited, jumped. Ramping
+                    // linearly across the whole interval lands on the next sample just as it
+                    // arrives, so the sweep never stops moving.
+                    .animation(.linear(duration: DownloadsService.sampleInterval), value: fraction)
             } else {
                 Circle()
                     .stroke(
@@ -67,7 +71,8 @@ struct DownloadProgressBar: View {
                     Capsule()
                         .fill(tint)
                         .frame(width: max(0, geometry.size.width * fraction))
-                        .animation(.easeOut(duration: 0.22), value: fraction)
+                        // Same beat as the ring: one linear ramp per sample, no dead time between.
+                        .animation(.linear(duration: DownloadsService.sampleInterval), value: fraction)
                 } else {
                     Capsule()
                         .fill(
