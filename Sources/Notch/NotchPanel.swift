@@ -123,7 +123,7 @@ final class NotchPanel: NSPanel {
         ignoresMouseEvents = false
         // Above the menu bar (level 24). Anything at or below it renders behind.
         level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        collectionBehavior = Self.everywhere
 
         host.hotRect = { [weak self] in self?.islandRect ?? .zero }
         host.onScroll = { [weak self] event in self?.onScroll?(event) }
@@ -247,10 +247,18 @@ final class NotchPanel: NSPanel {
         )
     }
 
+    /// Every Space, including over a fullscreen app's.
+    static let everywhere: NSWindow.CollectionBehavior =
+        [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+
     /// Ordering out rather than hiding keeps the panel off the screen-capture and Space lists too.
     func setVisible(_ visible: Bool) {
         if visible {
             guard !isVisible else { return }
+            // Re-asserted on every show: a window ordered out on one Space can come back belonging
+            // to that Space alone, which is exactly how the island ends up present on one desktop
+            // and missing on the next. Setting it again is free and puts it back on all of them.
+            collectionBehavior = Self.everywhere
             orderFrontRegardless()
         } else if isVisible {
             orderOut(nil)

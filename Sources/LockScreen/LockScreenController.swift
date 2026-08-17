@@ -155,7 +155,17 @@ final class LockScreenController {
     }
 
     private func pollLockState() {
-        guard !lifecycle.isSleeping else { return }
+        // `isSleeping` is only ever cleared by a wake notification, and this poll is the net that
+        // catches a missed one — so it cannot be gated on the flag itself. A stuck flag suppresses
+        // the main panel outright, which is the island vanishing until the next sleep cycle. Ask
+        // the display whether we are actually awake instead of trusting the bookkeeping.
+        if lifecycle.isSleeping {
+            guard CGDisplayIsAsleep(CGMainDisplayID()) == 0 else { return }
+            Debug.log("lock screen: recovered a missed wake")
+            lifecycle.apply(.didWake(isLocked: Private.screenIsLocked))
+            reconcile()
+            return
+        }
         let locked = Private.screenIsLocked
         guard locked != lifecycle.isLocked else { return }
         Debug.log("lock screen: state changed, locked=\(locked)")

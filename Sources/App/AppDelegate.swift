@@ -33,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let routes = RouteService()
     private var runtime = RuntimePresentationState()
     private var presentationObservation: NSKeyValueObservation?
+    private var hiddenWatch: Heartbeat.Token?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installStatusItem()
@@ -304,10 +305,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             activities.setPollingEnabled(runtime.effectsActive)
         }
         reconcileAudioTap()
+        watchWhileHidden()
         Debug.log(
             "runtime: hidden=\(runtime.isHidden) fullscreen=\(runtime.isFullScreen) "
                 + "suppressed=\(runtime.lifecycleSuppressed)"
         )
+    }
+
+    /// Hiding is driven entirely by notifications, and a missed or mistimed one latches: a Space
+    /// switch reports the *outgoing* Space as current if it is sampled during the animation, so the
+    /// island stays ordered out on the desktop it just arrived at until something else happens to
+    /// fire. Nothing re-checked, which is why it could sit missing on one Space for days. While
+    /// hidden, re-sample on the shared heartbeat; while visible there is no timer at all.
+    private func watchWhileHidden() {
+        if runtime.isHidden, hiddenWatch == nil {
+            hiddenWatch = Heartbeat.shared.subscribe(.slow) { [weak self] in
+                self?.refreshPresentation()
+            }
+        } else if !runtime.isHidden, let token = hiddenWatch {
+            Heartbeat.shared.cancel(token)
+            hiddenWatch = nil
+        }
     }
 
     private func reconcileAudioTap() {
