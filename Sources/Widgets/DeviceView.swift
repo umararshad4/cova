@@ -61,32 +61,32 @@ struct BatteryRing: View, Animatable {
 
 /// Compact connection flourish: a coloured device icon with wireless waves, never a battery ring.
 struct DeviceGlyph: View {
-    static let connectedTint = Color(red: 0.25, green: 0.72, blue: 1)
+    static let defaultTint = Color(red: 0.25, green: 0.72, blue: 1)
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let device: DeviceEvent
     let effectsActive: Bool
+    /// Honours "Tint with accent colour" — a shipped toggle that nothing read until now.
+    var useAccentColor = true
     @State private var shown = false
+
+    private var connectedTint: Color { useAccentColor ? Color.accentColor : Self.defaultTint }
 
     var body: some View {
         ZStack {
             if device.connected {
                 Image(systemName: "antenna.radiowaves.left.and.right")
                     .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(Self.connectedTint)
+                    .foregroundStyle(connectedTint)
                     .opacity(0.75)
-                    .symbolEffect(
-                        .pulse,
-                        options: .repeating,
-                        isActive: effectsActive && !reduceMotion
-                    )
+                    .pulsingSymbol(effectsActive && !reduceMotion)
             }
 
             Image(systemName: device.symbol)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(device.connected ? Self.connectedTint : .red)
+                .foregroundStyle(device.connected ? connectedTint : .red)
                 .shadow(
-                    color: (device.connected ? Self.connectedTint : .red).opacity(0.65),
+                    color: (device.connected ? connectedTint : .red).opacity(0.65),
                     radius: 4
                 )
         }

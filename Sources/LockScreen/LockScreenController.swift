@@ -39,9 +39,9 @@ struct LockLifecycleState {
 /// times building it. Three guardrails, none of them optional:
 ///
 ///  1. Disabled by default. Turn on with:
-///       defaults write dev.local.tyland lockScreenEnabled -bool YES
+///       defaults write <bundle-id> lockScreenEnabled -bool YES
 ///     Escape hatch, usable over SSH if the UI is unreachable:
-///       defaults write dev.local.tyland lockScreenEnabled -bool NO && pkill -x Tyland
+///       defaults write <bundle-id> lockScreenEnabled -bool NO && pkill -x Tyland
 ///  2. A watchdog force-tears-down the space shortly after unlock, even if the unlock
 ///     notification is missed.
 ///  3. Every private symbol is resolved at runtime; if any is missing the feature disables itself
@@ -57,11 +57,14 @@ final class LockScreenController {
     private var pollToken: Heartbeat.Token?
     private var lifecycle = LockLifecycleState()
 
-    private let coordinator: IslandCoordinator
+    /// Readable so `AppDelegate` can tell whether the island it renders is still the primary one.
+    let coordinator: IslandCoordinator
 
     var onSuppressionChange: ((Bool) -> Void)?
 
-    var isEnabled: Bool { UserDefaults.standard.bool(forKey: "lockScreenEnabled") }
+    /// Same key as before, now through `Settings` so the toggle in the Privacy tab is the real
+    /// switch rather than a second copy of it.
+    var isEnabled: Bool { Settings.shared.lockScreenEnabled }
 
     /// All symbols must resolve, or we refuse to start.
     private var symbolsAvailable: Bool {
@@ -86,10 +89,9 @@ final class LockScreenController {
 
     /// Where the card's centre sits, as a fraction of screen height measured from the top.
     /// Nudge without rebuilding:
-    ///   defaults write dev.local.tyland lockScreenPosition -float 0.72
+    ///   defaults write <bundle-id> lockScreenPosition -float 0.72
     private static var verticalFraction: Double {
-        let stored = UserDefaults.standard.double(forKey: "lockScreenPosition")
-        return stored > 0 ? min(max(stored, 0.05), 0.95) : 0.72
+        min(max(Settings.shared.lockScreenPosition, 0.05), 0.95)
     }
 
     func start() {
@@ -143,7 +145,7 @@ final class LockScreenController {
         reconcile()
 
         // Diagnostic: present immediately without locking, then tear down.
-        //   defaults write dev.local.tyland debugPresentLockScreen -bool YES
+        //   defaults write <bundle-id> debugPresentLockScreen -bool YES
         if UserDefaults.standard.bool(forKey: "debugPresentLockScreen") {
             present()
             Task { [weak self] in

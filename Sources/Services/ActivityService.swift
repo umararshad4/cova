@@ -17,6 +17,9 @@ final class ActivityService {
 
     private var focusWatcher: DispatchSourceFileSystemObject?
     private var focusDescriptor: CInt = -1
+    private var focusRetry: Heartbeat.Token?
+    /// Set once when the DoNotDisturb folder is TCC-protected — retrying that forever is pointless.
+    private(set) var focusNeedsFullDiskAccess = false
     private var micListener: AudioObjectPropertyListenerBlock?
     private var micAddress = AudioObjectPropertyAddress(
         mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere,
@@ -24,13 +27,15 @@ final class ActivityService {
         mElement: kAudioObjectPropertyElementMain
     )
     private var micDevice = AudioDeviceID(kAudioObjectUnknown)
+    private var inputListener: AudioObjectPropertyListenerBlock?
+    private var micActive = false
     private var cameraToken: Heartbeat.Token?
     private var cameraCheckInFlight = false
     private var cameraGeneration = 0
     private var pollingEnabled = true
     private var cameraInUse = false
     private var screenWatched = false
-    private let queue = DispatchQueue(label: "dev.local.tyland.activity")
+    private let queue = DispatchQueue(label: App.queue("activity"))
 
     private var assertionsURL: URL {
         URL(fileURLWithPath: NSHomeDirectory())
@@ -44,10 +49,18 @@ final class ActivityService {
     }
 
     func stop() {
+        cancelFocusRetry()
         focusWatcher?.cancel()
         focusWatcher = nil
         if focusDescriptor >= 0 { close(focusDescriptor) }
         focusDescriptor = -1
+        if let inputListener {
+            var address = Self.defaultInputAddress()
+            AudioObjectRemovePropertyListenerBlock(
+                AudioObjectID(kAudioObjectSystemObject), &address, queue, inputListener
+            )
+        }
+        inputListener = nil
 
         if let micListener, micDevice != AudioDeviceID(kAudioObjectUnknown) {
             AudioObjectRemovePropertyListenerBlock(micDevice, &micAddress, queue, micListener)
@@ -59,24 +72,75 @@ final class ActivityService {
 
     // MARK: - Focus
 
+    /// Watching this file is harder than it looks, in two ways that both end with the Focus
+    /// indicator frozen for the rest of the session:
+    ///
+    /// 1. macOS creates `Assertions.json` on demand when a Focus turns on and *unlinks* it when the
+    ///    last one turns off. So it is usually absent at launch, and the original code gave up
+    ///    permanently on that with a debug log.
+    /// 2. Changes arrive as write-temp-then-rename, so an `O_EVTONLY` descriptor stays bound to the
+    ///    old inode. The first toggle delivers `.rename`/`.delete` and every later one is invisible.
+    ///
+    /// So: re-open on every teardown event, and keep a slow retry running whenever we have no
+    /// descriptor at all.
     private func startFocus() {
         readFocus()
-        // The file is rewritten whenever a Focus turns on or off.
+        armFocusWatcher()
+    }
+
+    private func armFocusWatcher() {
+        focusWatcher?.cancel()
+        focusWatcher = nil
+        if focusDescriptor >= 0 { close(focusDescriptor) }
+
         focusDescriptor = open(assertionsURL.path, O_EVTONLY)
         guard focusDescriptor >= 0 else {
-            Debug.log("focus: assertions file unavailable")
+            // ENOENT is the normal "no Focus is active" state. EPERM means the DoNotDisturb folder
+            // is Full-Disk-Access protected and no amount of retrying will help, so say which.
+            if errno == EPERM || errno == EACCES {
+                focusNeedsFullDiskAccess = true
+                Debug.log("focus: needs Full Disk Access — indicator disabled")
+                return
+            }
+            focusDescriptor = -1
+            scheduleFocusRetry()
             return
         }
+
+        cancelFocusRetry()
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: focusDescriptor,
             eventMask: [.write, .delete, .rename, .extend],
             queue: queue
         )
         source.setEventHandler { [weak self] in
-            Task { @MainActor in self?.readFocus() }
+            let flags = source.data
+            Task { @MainActor in
+                guard let self else { return }
+                self.readFocus()
+                // The inode we hold is gone; the path may already point at a new one.
+                if flags.contains(.delete) || flags.contains(.rename) { self.armFocusWatcher() }
+            }
         }
         source.resume()
         focusWatcher = source
+    }
+
+    private func scheduleFocusRetry() {
+        guard focusRetry == nil, !focusNeedsFullDiskAccess else { return }
+        focusRetry = Heartbeat.shared.subscribe(.slow) { [weak self] in
+            guard let self, self.focusDescriptor < 0 else { return }
+            // Cheap: one stat-equivalent open() on the slow tick, only while unwatched.
+            if FileManager.default.fileExists(atPath: self.assertionsURL.path) {
+                self.readFocus()
+                self.armFocusWatcher()
+            }
+        }
+    }
+
+    private func cancelFocusRetry() {
+        if let focusRetry { Heartbeat.shared.cancel(focusRetry) }
+        focusRetry = nil
     }
 
     private func readFocus() {
@@ -117,20 +181,64 @@ final class ActivityService {
 
     // MARK: - Microphone
 
+    /// A fresh value per call: `AudioObject*PropertyListenerBlock` takes the address `inout`, and a
+    /// mutable static cannot be `nonisolated`. Matching is by value, so a local copy is equivalent.
+    private static func defaultInputAddress() -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+    }
+
     private func startMicrophone() {
-        micDevice = Self.defaultInputDevice()
-        guard micDevice != AudioDeviceID(kAudioObjectUnknown) else { return }
+        attachMicrophoneListener()
+
+        // The listener is bound to one device id. Plug in a USB mic, switch inputs, or unplug a
+        // headset and the old id stops reporting — the indicator would then be stuck on whatever it
+        // last saw. Follow the system's default-input property and re-attach.
+        let onDefaultChange: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            Task { @MainActor in self?.attachMicrophoneListener() }
+        }
+        var address = Self.defaultInputAddress()
+        if AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &address, queue, onDefaultChange
+        ) == noErr {
+            inputListener = onDefaultChange
+        }
+    }
+
+    private func attachMicrophoneListener() {
+        let next = Self.defaultInputDevice()
+        if let micListener, micDevice != AudioDeviceID(kAudioObjectUnknown) {
+            AudioObjectRemovePropertyListenerBlock(micDevice, &micAddress, queue, micListener)
+        }
+        micListener = nil
+        micDevice = next
+        guard micDevice != AudioDeviceID(kAudioObjectUnknown) else {
+            // No input device at all means nothing can be listening.
+            if micActive { micActive = false; onRecording?(.microphone, false) }
+            return
+        }
 
         let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             Task { @MainActor in
                 guard let self else { return }
-                self.onRecording?(.microphone, Self.isRunningSomewhere(self.micDevice))
+                self.applyMicrophone(Self.isRunningSomewhere(self.micDevice))
             }
         }
         if AudioObjectAddPropertyListenerBlock(micDevice, &micAddress, queue, listener) == noErr {
             micListener = listener
-            onRecording?(.microphone, Self.isRunningSomewhere(micDevice))
+            applyMicrophone(Self.isRunningSomewhere(micDevice))
         }
+    }
+
+    /// Deduped like the camera path, so re-attaching after a device change cannot double-fire the
+    /// mute/unmute cue.
+    private func applyMicrophone(_ active: Bool) {
+        guard active != micActive else { return }
+        micActive = active
+        onRecording?(.microphone, active)
     }
 
     private static func isRunningSomewhere(_ device: AudioDeviceID) -> Bool {
@@ -201,8 +309,15 @@ final class ActivityService {
         // main actor, which starves *every* Swift Task in the app — weather fetches, deferred
         // service starts, the lot. Keep it on a utility queue and hop back with the answer.
         Task.detached(priority: .utility) { [weak self] in
+            // `.external` replaced `.externalUnknown` in macOS 14; the deployment floor is 13.
+            var deviceTypes: [AVCaptureDevice.DeviceType] = [.builtInWideAngleCamera]
+            if #available(macOS 14.0, *) {
+                deviceTypes.append(.external)
+            } else {
+                deviceTypes.append(.externalUnknown)
+            }
             let inUse = AVCaptureDevice.DiscoverySession(
-                deviceTypes: [.builtInWideAngleCamera, .external],
+                deviceTypes: deviceTypes,
                 mediaType: .video,
                 position: .unspecified
             ).devices.contains { $0.isInUseByAnotherApplication }

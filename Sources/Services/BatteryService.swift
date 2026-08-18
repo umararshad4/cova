@@ -22,7 +22,7 @@ final class BatteryService {
     private var source: CFRunLoopSource?
     private var lowBatteryAnnounced = false
 
-    private let lowThreshold = 20
+    var lowThreshold = 20
 
     func start() {
         let context = Unmanaged.passUnretained(self).toOpaque()

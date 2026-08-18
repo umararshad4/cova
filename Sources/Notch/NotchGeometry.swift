@@ -13,6 +13,9 @@ struct NotchGeometry: Equatable {
     var topY: CGFloat
     /// True when driven by real notch hardware rather than the synthetic fallback.
     var isPhysical: Bool
+    /// Which display this was measured on. Needed to ask display-scoped questions later — "is
+    /// *this* screen showing a fullscreen app" is not the same as "is any screen".
+    var displayID: CGDirectDisplayID = 0
 
     /// Dimensions of the notch on a 14"/16" MacBook Pro at default scaling.
     ///
@@ -27,8 +30,15 @@ struct NotchGeometry: Equatable {
         static let none = Calibration(width: nil, height: nil)
     }
 
+    /// `CGDirectDisplayID` for a screen. Public API, just awkwardly spelled.
+    static func displayID(of screen: NSScreen) -> CGDirectDisplayID {
+        (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?
+            .uint32Value ?? 0
+    }
+
     static func detect(screen: NSScreen, calibration: Calibration = .none) -> NotchGeometry {
         let frame = screen.frame
+        let display = displayID(of: screen)
 
         // A real notch shows up as a top safe-area inset with a gap between the two auxiliary areas.
         if screen.safeAreaInsets.top > 0,
@@ -39,7 +49,8 @@ struct NotchGeometry: Equatable {
                 collapsedSize: CGSize(width: right.minX - left.maxX, height: screen.safeAreaInsets.top),
                 centerX: (left.maxX + right.minX) / 2,
                 topY: frame.maxY,
-                isPhysical: true
+                isPhysical: true,
+                displayID: display
             )
         }
 
@@ -50,7 +61,8 @@ struct NotchGeometry: Equatable {
             ),
             centerX: frame.midX,
             topY: frame.maxY,
-            isPhysical: false
+            isPhysical: false,
+            displayID: display
         )
     }
 }

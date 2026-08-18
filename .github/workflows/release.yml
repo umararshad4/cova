@@ -1,14 +1,17 @@
 name: Release
 
-# Cuts a version, builds the app, and attaches the DMG to a GitHub release on every main push.
-# Conventional commits choose the semantic bump; a push with no releasable conventional commit
-# gets a patch bump so every push still has a changelog entry and a versioned artifact.
+# Cuts a version, builds the app, and attaches the DMG to a GitHub release.
+# Conventional commits choose the semantic bump.
+#
+# Deliberately manual. This used to fire on every push to main, which is fine for a hobby build and
+# wrong for a paid one: a typo fix in the README shipped a new version to every customer, and each
+# ad-hoc-signed release also reset their TCC permissions. Cut a release when you mean to:
+#
+#   gh workflow run release.yml
 #
 # Nothing attacker-controlled (commit messages, refs) is ever interpolated into a `run:` block —
 # messages only ever reach the shell through `git log`, where they stay data.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -21,6 +24,10 @@ concurrency:
 jobs:
   release:
     runs-on: macos-15
+    # Job-level, because a step's `if:` can read the `env` context but not `secrets`. Empty when
+    # the signing secrets are not configured, which is how the signing step skips itself.
+    env:
+      HAS_SIGNING_CERT: ${{ secrets.DEVELOPER_ID_P12 != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,6 +35,26 @@ jobs:
 
       # Logic lives in the script so it can be run and tested outside CI:
       #   ./scripts/next-version.sh --self-check
+      # Everything that can fail runs before a tag exists, so a broken build leaves no trace.
+      - name: Checks
+        run: |
+          set -euo pipefail
+          ./scripts/next-version.sh --self-check
+          ./scripts/check-settings.sh
+          # A debug build keeps the full suite reachable; SelfTest.swift uses `precondition`, which
+          # survives -O, so the release binary is checked further down too.
+          ./build.sh debug
+          ./build/Tyland.app/Contents/MacOS/Tyland --self-test
+          # Informational: a CI runner has no logged-in media session, so "inconclusive" (3) is the
+          # expected answer. Exit 2 means MediaRemote itself failed to load, which is a real
+          # regression in the helper.
+          set +e
+          ./build/Tyland.app/Contents/Helpers/TylandHelper test
+          helper=$?
+          set -e
+          echo "helper probe exit: $helper"
+          [ "$helper" -ne 2 ] || { echo "MediaRemote no longer loadable" >&2; exit 1; }
+
       - name: Work out the next version
         id: version
         env:
@@ -44,10 +71,56 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Resources/Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" Resources/Info.plist
 
+      # Signing identity, if one is configured. Without these secrets the job still runs and still
+      # publishes — but package.sh prints a loud ad-hoc warning, because Gatekeeper will block the
+      # download for anyone who is not the developer.
+      - name: Import the Developer ID certificate
+        if: steps.version.outputs.release == 'true' && env.HAS_SIGNING_CERT == 'true'
+        env:
+          CERT_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/build.keychain"
+          KEYCHAIN_PASSWORD=$(uuidgen)
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          identity=$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' | head -1)
+          [ -n "$identity" ] || { echo "no Developer ID Application identity in the p12" >&2; exit 1; }
+          echo "TYLAND_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+
       # Before the tag is pushed, so a broken build leaves no dangling version behind.
       - name: Build and package
         if: steps.version.outputs.release == 'true'
-        run: ./package.sh
+        env:
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+          # Through the environment, never interpolated into the script: a secret spliced into a
+          # `run:` block breaks on quoting and can surface in a trace.
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          cleanup() { rm -f "$RUNNER_TEMP/notary.p8"; }
+          trap cleanup EXIT
+          if [ -n "${NOTARY_KEY_P8:-}" ]; then
+            printf '%s' "$NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+            export NOTARY_KEY_PATH="$RUNNER_TEMP/notary.p8"
+          fi
+          ./package.sh
+
+      # The shipped binary, not a debug one: `precondition` survives -O, `assert` did not — which is
+      # why the release self-test silently passed for every version up to this one.
+      - name: Self-test the release build
+        if: steps.version.outputs.release == 'true'
+        run: ./build/Tyland.app/Contents/MacOS/Tyland --self-test
 
       - name: Write the changelog entry
         if: steps.version.outputs.release == 'true'

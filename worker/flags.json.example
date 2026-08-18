@@ -1,0 +1,5 @@
+{
+  "issued": 1755500000,
+  "disabled": ["lockScreen"],
+  "versions": ["1.2.0", "1.2.1"]
+}

@@ -93,13 +93,14 @@ struct CompactActivityView: View {
         .background {
             // Only the flourish activities pay for a GeometryReader and a Canvas. Attaching this
             // unconditionally cost ~7% on the common now-playing path.
-            if let style = particleStyle {
+            if let style = particleStyle, coordinator.particlesEnabled {
                 GeometryReader { geo in
                     ParticleEmitter(field: particles, tint: particleTint)
                         .onAppear {
                             if coordinator.effectsActive { particles.start(style: style, in: geo.size) }
                         }
-                        .onChange(of: coordinator.effectsActive) { _, active in
+                        // Single-parameter form: the two-parameter `onChange` is macOS 14+.
+                        .onChange(of: coordinator.effectsActive) { active in
                             if active {
                                 particles.start(style: style, in: geo.size)
                             } else {
@@ -123,7 +124,9 @@ struct CompactActivityView: View {
     private var particleTint: Color {
         if case .power(.pluggedIn) = activity { return ChargingBolt.purple }
         if case .power = activity { return .green }
-        if case .device(let device) = activity, device.connected { return DeviceGlyph.connectedTint }
+        if case .device(let device) = activity, device.connected {
+            return coordinator.useAccentColor ? Color.accentColor : DeviceGlyph.defaultTint
+        }
         return .white
     }
 
@@ -141,7 +144,11 @@ struct CompactActivityView: View {
         case .power(let event):
             symbol(powerSymbol(event), tint: powerTint(event))
         case .device(let device):
-            DeviceGlyph(device: device, effectsActive: coordinator.effectsActive)
+            DeviceGlyph(
+                device: device,
+                effectsActive: coordinator.effectsActive,
+                useAccentColor: coordinator.useAccentColor
+            )
         case .nowPlaying:
             Artwork(image: coordinator.media?.artwork)
         case .focus(_, let symbolName):
@@ -198,7 +205,7 @@ struct CompactActivityView: View {
         Image(systemName: name)
             .font(.system(size: 13, weight: .medium))
             .foregroundStyle(tint)
-            .contentTransition(.symbolEffect(.replace))
+            .symbolReplaceTransition()
     }
 
     private func powerSymbol(_ event: PowerEvent) -> String {
@@ -239,14 +246,14 @@ struct ChargingBolt: View {
             Image(systemName: "bolt.fill")
                 .font(.system(size: size * 0.62, weight: .bold))
                 .foregroundStyle(Self.purple)
-                .symbolEffect(.pulse, options: .repeating, isActive: active && !reduceMotion)
+                .pulsingSymbol(active && !reduceMotion)
 
             Image(systemName: "wave.3.right")
                 .font(.system(size: size * 0.42, weight: .semibold))
                 .foregroundStyle(Self.purple)
                 .offset(x: size * 0.43)
                 .opacity(0.75)
-                .symbolEffect(.pulse, options: .repeating, isActive: active && !reduceMotion)
+                .pulsingSymbol(active && !reduceMotion)
         }
         .frame(width: size, height: size)
         .shadow(color: Self.purple.opacity(0.65), radius: 5)

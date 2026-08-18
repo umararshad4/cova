@@ -18,8 +18,13 @@ final class GestureService {
     private var lastFired = Date.distantPast
 
     /// Scroll distance before a swipe counts, and how long before another can fire.
-    private let threshold: CGFloat = 18
-    private let cooldown: TimeInterval = 0.45
+    var threshold: CGFloat = 18
+    var cooldown: TimeInterval = 0.45
+    /// Follows the trackpad's own natural-scroll setting. With natural scrolling on, a two-finger
+    /// pull *down* reports a positive deltaY; with it off, the sign is inverted and every gesture
+    /// in the app ran backwards — which is exactly what the shipped toggle promised to fix and
+    /// never did, because nothing read it.
+    var naturalMovement = true
 
     func stop() {
         if let monitor { NSEvent.removeMonitor(monitor) }
@@ -38,12 +43,12 @@ final class GestureService {
         accumulatedY += event.scrollingDeltaY
         accumulatedX += event.scrollingDeltaX
 
+        let sign: CGFloat = naturalMovement ? 1 : -1
         if abs(accumulatedY) >= threshold, abs(accumulatedY) > abs(accumulatedX) {
-            // Natural scrolling: a two-finger pull *down* gives a positive deltaY.
-            accumulatedY > 0 ? onSwipeDown?() : onSwipeUp?()
+            accumulatedY * sign > 0 ? onSwipeDown?() : onSwipeUp?()
             reset()
         } else if abs(accumulatedX) >= threshold {
-            accumulatedX > 0 ? onSwipeRight?() : onSwipeLeft?()
+            accumulatedX * sign > 0 ? onSwipeRight?() : onSwipeLeft?()
             reset()
         }
     }

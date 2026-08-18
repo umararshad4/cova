@@ -23,7 +23,7 @@ final class AudioTapService {
     private var running = false
     private var publishTimer: Timer?
 
-    private let queue = DispatchQueue(label: "dev.local.tyland.tap")
+    private let queue = DispatchQueue(label: App.queue("tap"))
 
     /// Smoothed so bars decay instead of flickering frame to frame.
     private var smoothed = [Float](repeating: 0, count: 4)

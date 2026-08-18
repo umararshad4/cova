@@ -1,3 +1,5 @@
+// ColorSync is where CGDisplayCreateUUIDFromDisplayID lives — public API, awkward home.
+import ColorSync
 import CoreGraphics
 import Foundation
 
@@ -102,22 +104,45 @@ enum Private {
         symbol(skyLight, "SLSHideSpaces", as: ShowHideSpaces.self)
         ?? symbol(skyLight, "CGSHideSpaces", as: ShowHideSpaces.self)
 
-    static func hasActiveFullScreenSpace(_ displays: [[String: Any]]) -> Bool {
-        displays.contains { display in
+    /// `SLSCopyManagedDisplaySpaces` returns one entry per managed display. Asking "does ANY display
+    /// have a fullscreen Space" hid the island on the built-in notch whenever a video went
+    /// fullscreen on a second monitor — with `hideWhileInFullscreen` on by default, dual-monitor
+    /// users simply lost the island during normal work.
+    ///
+    /// `matching` is the display's UUID string. Some macOS versions report the main display's entry
+    /// as the literal "Main" rather than a UUID, so that is accepted too. An unrecognised layout
+    /// falls back to the old any-display answer rather than silently reporting "not fullscreen".
+    static func hasActiveFullScreenSpace(_ displays: [[String: Any]], matching uuid: String? = nil) -> Bool {
+        func isFullScreen(_ display: [String: Any]) -> Bool {
             guard let current = display["Current Space"] as? [String: Any] else { return false }
             return current["type"] as? Int == 4
         }
+
+        guard let uuid else { return displays.contains(where: isFullScreen) }
+
+        let scoped = displays.filter { display in
+            guard let identifier = display["Display Identifier"] as? String else { return false }
+            return identifier == uuid || identifier == "Main"
+        }
+        guard !scoped.isEmpty else { return displays.contains(where: isFullScreen) }
+        return scoped.contains(where: isFullScreen)
+    }
+
+    /// UUID string for a display, as `SLSCopyManagedDisplaySpaces` spells it.
+    static func displayUUID(for display: CGDirectDisplayID) -> String? {
+        guard display != 0, let uuid = CGDisplayCreateUUIDFromDisplayID(display) else { return nil }
+        return CFUUIDCreateString(nil, uuid.takeRetainedValue()) as String?
     }
 
     /// Native fullscreen windows live in a dedicated Space even when the user's menu bar setting
     /// leaves `currentSystemPresentationOptions` at `.default`. This uses the same optional
     /// SkyLight lookup as the lock-screen feature and falls back cleanly if Apple removes it.
-    static var activeSpaceIsFullScreen: Bool? {
+    static func activeSpaceIsFullScreen(onDisplay display: CGDirectDisplayID = 0) -> Bool? {
         guard let mainConnection = cgsMainConnectionID,
               let copySpaces = cgsCopyManagedDisplaySpaces,
               let displays = copySpaces(mainConnection())?.takeRetainedValue() as? [[String: Any]]
         else { return nil }
-        return hasActiveFullScreenSpace(displays)
+        return hasActiveFullScreenSpace(displays, matching: displayUUID(for: display))
     }
 
     // MARK: - Screen capture detection

@@ -12,7 +12,11 @@ struct RouteEstimate: Equatable {
         Int(eventStart.timeIntervalSinceNow / 60) - travelMinutes
     }
 
-    var isUrgent: Bool { leaveInMinutes <= 15 }
+    /// Minutes-remaining below which the island turns urgent. Carried on the estimate so the view
+    /// stays a pure function of it.
+    var urgentBelowMinutes: Int = 15
+
+    var isUrgent: Bool { leaveInMinutes <= urgentBelowMinutes }
 }
 
 /// "Leave in N minutes" for the next calendar event that has a location.
@@ -22,10 +26,13 @@ struct RouteEstimate: Equatable {
 /// so mirroring an in-progress route is not possible. This uses MapKit the way Alcove links it, to
 /// deliver the useful half: knowing when to leave.
 @MainActor
-final class RouteService {
+final class RouteService: NSObject, CLLocationManagerDelegate {
     private(set) var estimate: RouteEstimate?
 
     var onChange: ((RouteEstimate?) -> Void)?
+    /// Surfaced in Settings: the ETA cannot work without a location fix, and macOS never re-prompts
+    /// once a user has said no.
+    var onAuthorizationChange: ((CLAuthorizationStatus) -> Void)?
 
     /// Set by `AppDelegate` from the calendar service.
     var upcomingEvents: [CalendarEvent] = [] {
@@ -39,9 +46,25 @@ final class RouteService {
     private var token: Heartbeat.Token?
     private var inFlight = false
     private var lastRoutedEventID: String?
+    private var awaitingFix = false
 
     /// Only bother routing for events starting within this window.
-    private let lookahead: TimeInterval = 3 * 3600
+    var lookahead: TimeInterval = 3 * 3600
+    /// Padding added to the travel time, so "leave now" arrives before it is actually now.
+    var bufferMinutes = 0
+    /// How you get there.
+    var transportType: MKDirectionsTransportType = .automobile
+    /// Minutes remaining below which the estimate reads as urgent.
+    var urgentMinutes = 15
+
+    var authorizationStatus: CLAuthorizationStatus { locationManager.authorizationStatus }
+
+    override init() {
+        super.init()
+        locationManager.delegate = self
+        // A driving ETA does not need a GPS-grade fix, and coarse accuracy is far cheaper.
+        locationManager.desiredAccuracy = kCLLocationAccuracyKilometer
+    }
 
     func start() {
         // Recompute every 5 minutes: traffic changes, and the countdown drifts.
@@ -60,18 +83,41 @@ final class RouteService {
             clear()
             return
         }
+
+        // Authorisation is requested *here*, not at launch: the prompt then arrives with a reason
+        // the user can see — there is an actual event with an address on it. Nothing in this file
+        // used to ask at all, so `locationManager.location` was nil on every machine and the
+        // "leave in N minutes" activity had never once fired.
+        switch locationManager.authorizationStatus {
+        case .notDetermined:
+            locationManager.requestWhenInUseAuthorization()
+            clear()
+            return
+        case .denied, .restricted:
+            clear()
+            return
+        default:
+            break
+        }
+
         guard let origin = locationManager.location else {
-            // No location fix means no honest ETA — say nothing rather than guess.
+            // Authorised, but no fix cached yet — ask for one. `location` is only ever populated by
+            // an explicit request; authorisation alone never fills it in.
+            if !awaitingFix {
+                awaitingFix = true
+                locationManager.requestLocation()
+            }
             clear()
             return
         }
+        awaitingFix = false
         guard !inFlight else { return }
         inFlight = true
         lastRoutedEventID = event.id
 
         let request = MKDirections.Request()
         request.source = MKMapItem(placemark: MKPlacemark(coordinate: origin.coordinate))
-        request.transportType = .automobile
+        request.transportType = transportType
 
         Task { [weak self] in
             defer { Task { @MainActor in self?.inFlight = false } }
@@ -98,8 +144,9 @@ final class RouteService {
                 guard let self else { return }
                 let next = RouteEstimate(
                     destination: location,
-                    travelMinutes: Int(response.expectedTravelTime / 60),
-                    eventStart: event.start
+                    travelMinutes: Int(response.expectedTravelTime / 60) + self.bufferMinutes,
+                    eventStart: event.start,
+                    urgentBelowMinutes: self.urgentMinutes
                 )
                 guard next != self.estimate else { return }
                 self.estimate = next
@@ -122,5 +169,29 @@ final class RouteService {
         guard estimate != nil else { return }
         estimate = nil
         onChange?(nil)
+    }
+
+    // MARK: - CLLocationManagerDelegate
+
+    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let status = manager.authorizationStatus
+        Task { @MainActor [weak self] in
+            self?.onAuthorizationChange?(status)
+            self?.recompute()
+        }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        Task { @MainActor [weak self] in
+            self?.awaitingFix = false
+            self?.recompute()
+        }
+    }
+
+    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        Task { @MainActor [weak self] in
+            self?.awaitingFix = false
+            Debug.log("route: location failed — \(error.localizedDescription)")
+        }
     }
 }

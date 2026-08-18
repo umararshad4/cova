@@ -15,9 +15,15 @@ final class CalendarService {
     private let store = EKEventStore()
     private var refreshTimer: Timer?
     private var storeObserver: NSObjectProtocol?
+    /// One query in flight at a time; CalDAV sync fires change notifications in bursts.
+    private var refreshing = false
+
+    /// How far ahead to look, and how many events to keep. Settings-backed.
+    var lookaheadHours = 18
+    var eventLimit = 4
 
     func start() {
-        store.requestFullAccessToEvents { [weak self] granted, error in
+        let handler: (Bool, Error?) -> Void = { [weak self] granted, error in
             Task { @MainActor in
                 guard granted else {
                     Debug.log("calendar access denied: \(error?.localizedDescription ?? "no reason")")
@@ -27,6 +33,18 @@ final class CalendarService {
                 self?.refresh()
             }
         }
+        // `requestFullAccessToEvents` is macOS 14+; on 13 the old combined request is the only one.
+        if #available(macOS 14.0, *) {
+            store.requestFullAccessToEvents(completion: handler)
+        } else {
+            store.requestAccess(to: .event, completion: handler)
+        }
+    }
+
+    /// Public status, for the permissions pane. Only Calendar has a clean pre-flight query — audio
+    /// capture and the Downloads folder have none, and must be inferred from a failed call.
+    static var authorizationStatus: EKAuthorizationStatus {
+        EKEventStore.authorizationStatus(for: .event)
     }
 
     func stop() {
@@ -53,47 +71,81 @@ final class CalendarService {
     }
 
     private func refresh() {
+        // EventKit's own header: "It is synchronous… you should run the query someplace other than
+        // the main thread, and then funnel the array back." A shared CalDAV calendar makes the month
+        // query take seconds, and it re-runs on every EKEventStoreChanged burst.
+        guard !refreshing else { return }
+        refreshing = true
         let now = Date()
-        guard let end = Calendar.current.date(byAdding: .hour, value: 18, to: now) else { return }
+        let store = store
+        let lookahead = lookaheadHours
+        let limit = eventLimit
+
+        Task.detached(priority: .utility) { [weak self] in
+            let result = Self.query(store: store, now: now, lookaheadHours: lookahead, limit: limit)
+            guard let self else { return }
+            await MainActor.run { self.applyRefresh(result) }
+        }
+    }
+
+    private func applyRefresh(_ result: (events: [CalendarEvent], busyDays: Set<Int>)) {
+        refreshing = false
+        if result.events != events {
+            events = result.events
+            onChange?(result.events)
+            Debug.log("calendar: \(result.events.count) upcoming")
+        }
+        guard result.busyDays != busyDays else { return }
+        busyDays = result.busyDays
+        onMonthChange?(result.busyDays)
+    }
+
+    /// Both queries in one off-actor pass. `EKEvent.startDate` is imported as `Date!` and really is
+    /// nil for detached occurrences and some CalDAV/Exchange rows, so every read goes through
+    /// `startDate as Date?` — force-unwrapping it crashed the whole app on one malformed event.
+    private nonisolated static func query(
+        store: EKEventStore,
+        now: Date,
+        lookaheadHours: Int,
+        limit: Int
+    ) -> (events: [CalendarEvent], busyDays: Set<Int>) {
+        let calendar = Calendar.current
+        guard let end = calendar.date(byAdding: .hour, value: lookaheadHours, to: now) else {
+            return ([], [])
+        }
 
         let predicate = store.predicateForEvents(withStart: now, end: end, calendars: nil)
-        let found = store.events(matching: predicate)
-            .filter { !$0.isAllDay || Calendar.current.isDateInToday($0.startDate) }
-            .sorted { $0.startDate < $1.startDate }
-            .prefix(4)
-            .map {
+        let upcoming: [CalendarEvent] = store.events(matching: predicate)
+            .compactMap { event -> (EKEvent, Date)? in
+                guard let start = event.startDate as Date? else { return nil }
+                return (event, start)
+            }
+            .filter { !$0.0.isAllDay || calendar.isDateInToday($0.1) }
+            .sorted { $0.1 < $1.1 }
+            .prefix(limit)
+            .map { event, start in
                 CalendarEvent(
-                    id: $0.eventIdentifier ?? UUID().uuidString,
-                    title: $0.title ?? "Untitled",
-                    start: $0.startDate,
-                    isAllDay: $0.isAllDay,
-                    location: $0.location
+                    id: event.eventIdentifier ?? UUID().uuidString,
+                    title: event.title ?? "Untitled",
+                    start: start,
+                    isAllDay: event.isAllDay,
+                    location: event.location,
+                    url: event.url,
+                    notes: event.notes,
+                    tint: event.calendar?.cgColor
                 )
             }
 
-        let next = Array(found)
-        if next != events {
-            events = next
-            onChange?(next)
-            Debug.log("calendar: \(next.count) upcoming")
-        }
-        refreshMonth(around: now)
-    }
-
-    /// Which days of the visible month have something on them, for the mini month grid.
-    private func refreshMonth(around date: Date) {
-        let calendar = Calendar.current
-        guard let interval = calendar.dateInterval(of: .month, for: date) else { return }
-
-        let predicate = store.predicateForEvents(
-            withStart: interval.start, end: interval.end, calendars: nil
-        )
         var days: Set<Int> = []
-        for event in store.events(matching: predicate) {
-            days.insert(calendar.component(.day, from: event.startDate))
+        if let interval = calendar.dateInterval(of: .month, for: now) {
+            let monthPredicate = store.predicateForEvents(
+                withStart: interval.start, end: interval.end, calendars: nil
+            )
+            for event in store.events(matching: monthPredicate) {
+                guard let start = event.startDate as Date? else { continue }
+                days.insert(calendar.component(.day, from: start))
+            }
         }
-        guard days != busyDays else { return }
-        busyDays = days
-        onMonthChange?(days)
+        return (upcoming, days)
     }
 }

@@ -190,14 +190,14 @@ if CommandLine.arguments.contains("artwork-test") {
     var tracker = ArtworkTracker()
     let cover = Data("delayed-cover".utf8)
     _ = tracker.encodedArtwork(trackKey: "video", artwork: nil, force: true)
-    assert(tracker.encodedArtwork(trackKey: "video", artwork: cover) == cover.base64EncodedString(),
+    precondition(tracker.encodedArtwork(trackKey: "video", artwork: cover) == cover.base64EncodedString(),
            "artwork arriving after metadata must be emitted")
     // The flicker: mediaremoted omits the artwork from most refreshes of the same track.
-    assert(tracker.encodedArtwork(trackKey: "video", artwork: nil) == nil,
+    precondition(tracker.encodedArtwork(trackKey: "video", artwork: nil) == nil,
            "a refresh without artwork must not clear the cover mid-track")
-    assert(tracker.encodedArtwork(trackKey: "video", artwork: cover) == nil,
+    precondition(tracker.encodedArtwork(trackKey: "video", artwork: cover) == nil,
            "the cover coming back must not repaint either — it never went away")
-    assert(tracker.encodedArtwork(trackKey: "other", artwork: nil) == "",
+    precondition(tracker.encodedArtwork(trackKey: "other", artwork: nil) == "",
            "a new track with no artwork must clear the previous cover")
     print("artwork test passed")
     exit(0)
@@ -209,18 +209,49 @@ if CommandLine.arguments.contains("test") {
         FileHandle.standardError.write("MediaRemote not loadable\n".data(using: .utf8)!)
         exit(2)
     }
-    // The question is "will mediaremoted talk to us", NOT "is something playing right now".
-    // A nil/empty dictionary still proves access was granted; only silence means refusal.
+    // This is a THREE-state answer, and collapsing it to two breaks the app in one direction or
+    // the other:
+    //
+    //   granted      a non-empty info dictionary or a non-zero now-playing PID. Only a process
+    //                mediaremoted trusts ever sees these.
+    //   refused      no callback at all inside the timeout.
+    //   inconclusive the callback fired but carried nothing. Since macOS 15.4 a *refused* process
+    //                gets its block invoked with a nil dictionary and PID 0 — which is byte-for-byte
+    //                what a granted process sees when nothing is playing.
+    //
+    // Treating inconclusive as success hid a real loss of access (Now Playing just went blank);
+    // treating it as failure demoted everyone to AppleScript whenever playback was merely stopped.
+    // So report it honestly and let the caller retry when there is something to see.
     let semaphore = DispatchSemaphore(value: 0)
-    nonisolated(unsafe) var callbackFired = false
-    getNowPlayingInfo(queue) { _ in
-        callbackFired = true
-        semaphore.signal()
+    nonisolated(unsafe) var granted = false
+    nonisolated(unsafe) var answered = false
+    nonisolated(unsafe) var pending = getPID == nil ? 1 : 2
+
+    let settle = {
+        pending -= 1
+        if pending <= 0 { semaphore.signal() }
+    }
+    getNowPlayingInfo(queue) { info in
+        answered = true
+        if let info, CFDictionaryGetCount(info) > 0 { granted = true }
+        settle()
+    }
+    getPID?(queue) { pid in
+        answered = true
+        if pid != 0 { granted = true }
+        settle()
     }
     _ = semaphore.wait(timeout: .now() + 3)
-    if callbackFired {
+
+    if granted {
         print("ok")
         exit(0)
+    }
+    if answered {
+        FileHandle.standardError.write(
+            "mediaremoted answered but reported nothing — inconclusive\n".data(using: .utf8)!
+        )
+        exit(3)
     }
     FileHandle.standardError.write("mediaremoted did not answer (entitlement refused)\n".data(using: .utf8)!)
     exit(1)

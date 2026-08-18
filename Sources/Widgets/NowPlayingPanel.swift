@@ -40,7 +40,7 @@ struct NowPlayingPanel: View {
                 Image(systemName: media.isPlaying ? "waveform" : "pause.fill")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(media.accent.opacity(0.9))
-                    .contentTransition(.symbolEffect(.replace))
+                    .symbolReplaceTransition()
                     .frame(width: 20)
             }
 
@@ -274,7 +274,7 @@ private struct TransportButton: View {
             Image(systemName: symbol)
                 .font(.system(size: size, weight: .semibold))
                 .foregroundStyle(.white.opacity(hovering ? 1 : 0.88))
-                .contentTransition(.symbolEffect(.replace))
+                .symbolReplaceTransition()
                 .frame(width: primary ? 34 : 30, height: 28)
                 .background {
                     Capsule(style: .continuous)

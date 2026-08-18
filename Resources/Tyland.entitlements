@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Hardened-runtime resource access. These are the *resource* entitlements, which a
+	     Developer ID app may claim freely; none of them is sandbox-only.
+
+	     Deliberately NOT here: com.apple.security.cs.disable-library-validation. The dlopen calls
+	     in PrivateSymbols.swift and Helper/main.swift target Apple-signed binaries under
+	     /System/Library/PrivateFrameworks, and library validation already permits those. Asking
+	     for the exemption anyway weakens the binary and invites notarization questions. -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<key>com.apple.security.device.camera</key>
+	<true/>
+	<key>com.apple.security.personal-information.calendars</key>
+	<true/>
+	<key>com.apple.security.personal-information.location</key>
+	<true/>
+</dict>
+</plist>

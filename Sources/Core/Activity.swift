@@ -76,7 +76,10 @@ enum Activity: Equatable {
         case .device: return "device"
         case .nowPlaying: return "nowPlaying"
         case .focus: return "focus"
-        case .recording: return "recording"
+        // One slot per kind. Sharing "recording" meant a microphone stream closing withdrew the
+        // camera indicator too — and neither producer re-pushes, because both are edge-triggered,
+        // so the camera light stayed off for the rest of the call.
+        case .recording(let kind): return "recording.\(kind.slotName)"
         case .download: return "download"
         case .route: return "route"
         }
@@ -115,10 +118,20 @@ struct DeviceEvent: Equatable {
     }
 }
 
-enum RecordingKind: Equatable {
+enum RecordingKind: Equatable, CaseIterable {
     case screen
     case camera
     case microphone
+
+    /// Stable slot suffix. Spelled out rather than derived from `String(describing:)` so a rename
+    /// of the case cannot silently orphan a live activity in the coordinator.
+    var slotName: String {
+        switch self {
+        case .screen: return "screen"
+        case .camera: return "camera"
+        case .microphone: return "microphone"
+        }
+    }
 
     var symbol: String {
         switch self {

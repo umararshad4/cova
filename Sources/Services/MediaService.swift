@@ -13,9 +13,14 @@ final class MediaService {
 
     private var process: Process?
     private var input: Pipe?
+    private var output: Pipe?
     private var buffer = Data()
     private var restartDelay: TimeInterval = 0.5
     private var stopping = false
+    /// Bumped on every intentional teardown. `terminate()` is asynchronous, so its termination
+    /// handler lands *after* the code that asked for it has moved on — without this the handler
+    /// respawned the helper we had just demoted, leaving it duelling the AppleScript fallback.
+    private var generation = 0
 
     /// Artwork only arrives when the track changes, so it is carried forward between updates.
     private var lastArtwork: Data?
@@ -30,6 +35,13 @@ final class MediaService {
     /// Forces a backend. `system` prefers the MediaRemote helper.
     var preferredApp = "system"
 
+    /// Skip the MediaRemote helper entirely and use AppleScript.
+    ///
+    /// This is what the remote kill switch turns on: the day Apple closes the signing-identifier
+    /// hole, every customer can be moved to the degraded-but-working path within hours, instead of
+    /// staring at a blank island until a Sparkle update reaches them.
+    var forceFallback = false
+
     private var fallback: AppleScriptMediaBackend?
 
     func start() {
@@ -40,22 +52,46 @@ final class MediaService {
             useFallback(preferring: player)
             return
         }
+        if forceFallback {
+            Debug.log("media: helper disabled remotely — using AppleScript")
+            useFallback(preferring: nil)
+            return
+        }
 
         // Start the helper optimistically — blocking launch on a subprocess would stall the app
-        // for up to three seconds. The self-test runs alongside and demotes us only if it fails.
+        // for up to three seconds. The probe runs alongside and demotes us only on a real refusal.
         spawn()
+        probeHelper(attempt: 0)
+    }
+
+    /// `inconclusive` means "mediaremoted answered but nothing is playing", which is
+    /// indistinguishable from a refusal in a single sample. Keep the helper — it costs nothing while
+    /// idle — and re-ask on a slow cadence until something plays and the answer becomes real.
+    private func probeHelper(attempt: Int) {
         Task { [weak self] in
-            let ok = await Self.helperPassesSelfTest(at: self?.helperURL)
-            guard let self, !self.stopping, !ok else { return }
-            Debug.log("media helper self-test failed — falling back to AppleScript")
-            self.stopping = true
-            self.input?.fileHandleForWriting.closeFile()
-            self.process?.terminate()
-            self.process = nil
-            self.stopping = false
-            self.useFallback(preferring: nil)
+            let verdict = await Self.probe(at: self?.helperURL)
+            guard let self, !self.stopping, self.fallback == nil else { return }
+            switch verdict {
+            case .granted:
+                Debug.log("media helper: mediaremoted access confirmed")
+            case .refused:
+                Debug.log("media helper refused by mediaremoted — falling back to AppleScript")
+                self.teardownHelper()
+                self.useFallback(preferring: nil)
+            case .inconclusive:
+                guard attempt < Self.maxProbeAttempts else {
+                    Debug.log("media helper: still inconclusive after \(attempt) probes, leaving it running")
+                    return
+                }
+                try? await Task.sleep(for: .seconds(Self.probeRetryDelay))
+                guard !self.stopping, self.fallback == nil else { return }
+                self.probeHelper(attempt: attempt + 1)
+            }
         }
     }
+
+    private static let maxProbeAttempts = 10
+    private static let probeRetryDelay: TimeInterval = 60
 
     private func useFallback(preferring player: AppleScriptMediaBackend.Player?) {
         let backend = AppleScriptMediaBackend()
@@ -68,10 +104,16 @@ final class MediaService {
         fallback = backend
     }
 
-    /// Runs `TylandHelper test`, which exits 0 only when mediaremoted actually answered.
-    /// Off the main actor so a slow or wedged helper cannot stall launch.
-    private nonisolated static func helperPassesSelfTest(at url: URL?) async -> Bool {
-        guard let url, FileManager.default.isExecutableFile(atPath: url.path) else { return false }
+    /// What `TylandHelper test` reports. Exit 3 is the honest "cannot tell yet".
+    enum Verdict {
+        case granted
+        case refused
+        case inconclusive
+    }
+
+    /// Runs `TylandHelper test` off the main actor, so a slow or wedged helper cannot stall launch.
+    private nonisolated static func probe(at url: URL?) async -> Verdict {
+        guard let url, FileManager.default.isExecutableFile(atPath: url.path) else { return .refused }
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
                 let process = Process()
@@ -82,9 +124,13 @@ final class MediaService {
                 do {
                     try process.run()
                     process.waitUntilExit()
-                    continuation.resume(returning: process.terminationStatus == 0)
+                    switch process.terminationStatus {
+                    case 0: continuation.resume(returning: .granted)
+                    case 3: continuation.resume(returning: .inconclusive)
+                    default: continuation.resume(returning: .refused)
+                    }
                 } catch {
-                    continuation.resume(returning: false)
+                    continuation.resume(returning: .refused)
                 }
             }
         }
@@ -94,9 +140,29 @@ final class MediaService {
         stopping = true
         fallback?.stop()
         fallback = nil
+        teardownHelper()
+    }
+
+    /// Changing the music source has to tear the backend down and pick again — `preferredApp` is
+    /// only consulted inside `start()`.
+    func restart() {
+        stop()
+        state = MediaState()
+        start()
+    }
+
+    /// Releases the pipes as well as the process. A readability handler left installed keeps the
+    /// pipe (and this service) alive and can still deliver a chunk from a dead helper.
+    private func teardownHelper() {
+        generation &+= 1
+        output?.fileHandleForReading.readabilityHandler = nil
         input?.fileHandleForWriting.closeFile()
+        process?.terminationHandler = nil
         process?.terminate()
         process = nil
+        input = nil
+        output = nil
+        buffer.removeAll()
     }
 
     func send(_ command: MediaCommand) {
@@ -139,20 +205,26 @@ final class MediaService {
         process.standardInput = input
         process.standardError = FileHandle.nullDevice
 
+        let spawnGeneration = generation
+
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let chunk = handle.availableData
             guard !chunk.isEmpty else { return }
-            Task { @MainActor in self?.ingest(chunk) }
+            Task { @MainActor in
+                guard let self, self.generation == spawnGeneration else { return }
+                self.ingest(chunk)
+            }
         }
 
         process.terminationHandler = { [weak self] _ in
-            Task { @MainActor in self?.helperDied() }
+            Task { @MainActor in self?.helperDied(generation: spawnGeneration) }
         }
 
         do {
             try process.run()
             self.process = process
             self.input = input
+            self.output = output
             restartDelay = 0.5
             Debug.log("media helper started")
         } catch {
@@ -160,17 +232,21 @@ final class MediaService {
         }
     }
 
-    private func helperDied() {
-        guard !stopping else { return }
+    private func helperDied(generation spawnGeneration: Int) {
+        // A stale handler from a helper we deliberately replaced must not resurrect it.
+        guard !stopping, spawnGeneration == generation else { return }
+        output?.fileHandleForReading.readabilityHandler = nil
         process = nil
         input = nil
+        output = nil
         Debug.log("media helper died, restarting in \(restartDelay)s")
         let delay = restartDelay
         // Back off so a helper that cannot run doesn't spin.
         restartDelay = min(restartDelay * 2, 30)
+        let restartGeneration = generation
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
-            guard let self, !self.stopping else { return }
+            guard let self, !self.stopping, restartGeneration == self.generation else { return }
             self.spawn()
         }
     }

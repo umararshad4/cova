@@ -25,14 +25,45 @@ final class IslandCoordinator: ObservableObject {
     @Published var effectsActive = true
 
 
-    /// Settings-backed, mirroring Alcove's own keys.
     @Published var expandOnHover = true
     /// Seconds the pointer must rest on the notch before it opens. 0 opens immediately.
     var hoverDuration: TimeInterval = 0
 
+    /// How long each class of transient activity lingers. These live here rather than on `Activity`
+    /// so the activity stays a pure value type with no opinion about user preferences.
+    var hudDuration: TimeInterval = 1.4
+    var powerDuration: TimeInterval = 3.0
+    var deviceDuration: TimeInterval = 4.0
+
+    /// Charging sparkle and device-connect burst. Off is a real preference, not just Reduce Motion.
+    @Published var particlesEnabled = true
+    /// Tint device and gesture feedback with the system accent colour.
+    @Published var useAccentColor = true
+
+    /// `Activity.duration` still decides live-vs-transient; only the timing is a preference.
+    private func dwell(for activity: Activity) -> TimeInterval {
+        switch activity {
+        case .volume, .brightness, .keyboardBacklight: return hudDuration
+        case .power: return powerDuration
+        case .device: return deviceDuration
+        default: return hudDuration
+        }
+    }
+
     /// Audio levels live in their own observable so 30 Hz updates repaint four capsules instead of
     /// the entire island (notch path, clip shape and all). Measured: ~30% CPU versus ~1%.
     let levelStore = LevelStore()
+
+    /// True only while the compact Now Playing view — the one thing that draws a waveform — is the
+    /// visible activity. The expanded panel draws album art instead, and any higher-priority
+    /// activity (a volume HUD, a download, a device connect) covers it entirely.
+    var waveformIsVisible: Bool {
+        !isExpanded && current == .nowPlaying
+    }
+
+    /// Fired whenever `waveformIsVisible` may have changed, so the tap can be started and stopped
+    /// with what is on screen rather than with playback.
+    var onPresentationChange: (() -> Void)?
 
     /// Wired by `AppDelegate` to whichever media backend is live.
     var mediaCommand: ((MediaCommand) -> Void)?
@@ -59,13 +90,26 @@ final class IslandCoordinator: ObservableObject {
         } else {
             transient = activity
             expiry?.cancel()
-            let duration = activity.duration ?? 1.4
+            let duration = dwell(for: activity)
             expiry = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(duration))
                 guard !Task.isCancelled else { return }
                 self?.clearTransient()
             }
         }
+        recompute()
+    }
+
+    /// Copies the resident state of another island, so plugging in a monitor mid-song shows the
+    /// song rather than an empty notch until the next update happens to arrive.
+    func adopt(from other: IslandCoordinator) {
+        media = other.media
+        battery = other.battery
+        events = other.events
+        device = other.device
+        download = other.download
+        effectsActive = other.effectsActive
+        live = other.live
         recompute()
     }
 
@@ -83,10 +127,18 @@ final class IslandCoordinator: ObservableObject {
     }
 
     private func recompute() {
+        let before = waveformIsVisible
         let best = live.values.max { $0.priority < $1.priority }
-        guard let transient else { current = best; return }
-        guard let best, best.priority > transient.priority else { current = transient; return }
-        current = best
+        if let transient {
+            if let best, best.priority > transient.priority {
+                current = best
+            } else {
+                current = transient
+            }
+        } else {
+            current = best
+        }
+        if waveformIsVisible != before { onPresentationChange?() }
     }
 
     // MARK: - Expansion
@@ -101,8 +153,10 @@ final class IslandCoordinator: ObservableObject {
     /// Every path into `isExpanded` goes through here, so panel growth stays in the same update.
     private func setExpanded(_ value: Bool) {
         guard value != isExpanded else { return }
+        let before = waveformIsVisible
         isExpanded = value
         if value { onExpand?() }
+        if waveformIsVisible != before { onPresentationChange?() }
     }
 
     func hover(_ inside: Bool) {

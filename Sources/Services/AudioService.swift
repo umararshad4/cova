@@ -15,7 +15,7 @@ final class AudioService {
 
     private var device = AudioDeviceID(kAudioObjectUnknown)
     private var listeners: [(AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyListenerBlock)] = []
-    private let queue = DispatchQueue(label: "dev.local.tyland.audio")
+    private let queue = DispatchQueue(label: App.queue("audio"))
     private var primed = false
 
     private static let virtualMainVolume = fourCC("vmvc")
