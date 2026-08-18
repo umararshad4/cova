@@ -2,19 +2,22 @@
 
 A macOS Dynamic Island for the notch.
 
-A macOS Dynamic Island for the notch, rebuilt from scratch after tearing down the shipping Alcove
-1.7.7. Native SwiftUI + AppKit, no Xcode, no external packages.
+A macOS Dynamic Island for the notch. Native SwiftUI + AppKit, no Xcode, no external packages.
 
-**Works on Macs without a notch.** This machine (M1 13", 2020) has none — `safeAreaInsets.top == 0` —
-and the real Alcove renders nothing here. `NotchGeometry` detects a physical notch when present and
-otherwise synthesises one with 14"/16" dimensions, so the app looks and behaves the same either way.
+**Works on every Mac, notch or no notch.** `NotchGeometry` uses the real notch when the hardware has
+one, and otherwise synthesises one at 14"/16" dimensions, so the app looks and behaves the same on a
+notchless MacBook Air, a Mac mini on an external monitor, or a 2019 MacBook Pro. Universal binary,
+macOS 13 and later.
 
 ## Build & run
 
 ```bash
-./build.sh            # debug
-./build.sh release    # optimised
+./build.sh            # debug: arm64 only, ad-hoc signed, ~16s
+./build.sh release    # optimised, universal (arm64 + x86_64)
 open build/Tyland.app
+
+# For a build anyone else can install, sign it for real:
+TYLAND_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./build.sh release
 ```
 
 ## Install
@@ -23,9 +26,17 @@ open build/Tyland.app
 ./package.sh          # -> build/Tyland.zip (and build/Tyland.dmg when hdiutil is healthy)
 ```
 
-Unzip and drag `Tyland.app` to `/Applications`. It is ad-hoc signed, so the first launch needs
-**right-click → Open** (or `xattr -dr com.apple.quarantine /Applications/Tyland.app` if it was
-downloaded). Permissions are keyed to the signature, so moving or rebuilding the app re-prompts.
+Unzip and drag `Tyland.app` to `/Applications`.
+
+A build signed with a Developer ID and notarized opens with a double-click. An **ad-hoc** build — the
+default, and what you get from `./build.sh` without `TYLAND_SIGN_IDENTITY` — is quarantined when
+downloaded: macOS 15 removed the right-click → Open shortcut, so the only way in is
+**System Settings › Privacy & Security › Open Anyway**, or `xattr -dr com.apple.quarantine
+/Applications/Tyland.app`.
+
+Permissions are keyed to the code signature, so an ad-hoc build re-prompts for Calendar, microphone,
+camera and Bluetooth every time it is rebuilt or moved. A stable Developer ID signature is what stops
+that, which is why signing matters well beyond Gatekeeper.
 
 `package.sh` prefers `hdiutil makehybrid` + `convert` over `hdiutil create -srcfolder`, because the
 latter attaches a temporary volume and hangs indefinitely when DiskArbitration is wedged. If the DMG
@@ -36,15 +47,26 @@ Requires only Command Line Tools — the CLT SDK ships SwiftUI, AppKit, CoreAudi
 rest. No `.xcodeproj`, no SPM manifest.
 
 ```bash
-./build/Tyland.app/Contents/MacOS/Alcove --self-test   # geometry, shape, activity priority, media maths
+./build/Tyland.app/Contents/MacOS/Tyland --self-test   # geometry, shape, activity priority, media maths
+./scripts/check-settings.sh                            # no preference may be written and never read
 TYLAND_DEBUG=1 open -a build/Tyland.app --stderr /tmp/tyland.log   # trace to stderr
 ```
 
 ## Releases
 
-Pushing to `main` cuts a release: `.github/workflows/release.yml` works out the version, builds,
-and attaches `Tyland.dmg` (and `Tyland.zip`) to a GitHub release. [`CHANGELOG.md`](CHANGELOG.md) is
+Releases are cut deliberately, not on every push:
+
+```bash
+gh workflow run release.yml
+```
+
+`.github/workflows/release.yml` runs the checks, works out the version, builds, signs, notarizes and
+attaches `Tyland.dmg` and `Tyland.zip` to a GitHub release. [`CHANGELOG.md`](CHANGELOG.md) is
 regenerated from the commit messages and committed back.
+
+It used to fire on every push to `main`. That is fine for a hobby build and wrong for a paid one: a
+README typo shipped a new version to everyone, and — because releases were ad-hoc signed — each one
+reset every user's Calendar, microphone, camera and Bluetooth permissions.
 
 The version comes from [conventional commits](https://www.conventionalcommits.org) since the last
 `vX.Y.Z` tag — the commit message chooses the bump, while every push to `main` still publishes:
@@ -67,7 +89,9 @@ build report the same number. The bump logic is a plain script, and it tests its
 ./scripts/next-version.sh                # what the next release would be, from here
 ```
 
-Releases are ad-hoc signed and **not notarized** — same right-click → Open caveat as above.
+A release built with `TYLAND_SIGN_IDENTITY` and notary credentials is signed with a Developer ID,
+notarized and stapled, and opens with a double-click. Without those secrets the workflow still
+publishes, but `package.sh` prints a loud warning: an ad-hoc artifact is for local use only.
 
 ## What it does
 
@@ -86,15 +110,43 @@ Releases are ad-hoc signed and **not notarized** — same right-click → Open c
 | Screen recording | Detected via private `CGSIsScreenWatcherPresent` |
 | Particles | Charging sparkle, device-connect burst |
 | Lock Screen | Clock, date, battery, now playing — **off by default**, see below |
-| Settings | Tabbed: General / Widgets / Sounds / Notch, including size calibration |
+| Multi-display | An island per screen — built-in, active, or all displays |
+| Onboarding | First run explains every permission before asking, and never asks for one a disabled widget would need |
+| Settings | Seven tabs — General, Widgets, Gestures, Sounds, Notch, Privacy, License — 42 preferences, every one of them live |
+
+## Free and Pro
+
+`Sources/Core/License.swift` verifies an Ed25519-signed licence blob offline with CryptoKit —
+no dependency, and no network on any blocking path. Gating happens in exactly one place,
+`AppDelegate.pro(_:)`, at the point a service is *started*, never in a view.
+
+| | Free forever | Pro |
+|---|---|---|
+| Now Playing, every HUD, device battery, Focus and recording indicators, gestures, sounds, downloads in `~/Downloads` | ✅ | ✅ |
+| Built-in display | ✅ | ✅ |
+| Any other display, and all-displays mode | | ✅ |
+| Live audio waveform | | ✅ |
+| Calendar and leave-in time | | ✅ |
+| Lock screen widgets | | ✅ |
+| Extra download folders | | ✅ |
+
+`License.bypassGate` is **true**: the plumbing runs in real builds while nothing is withheld. Flip it
+to `false` to switch the paywall on. Before selling anything, generate your own signing pair and
+replace `License.publicKeyHex` — the committed value is a placeholder that validates nothing:
+
+```bash
+swift scripts/make-license-key.swift --generate
+swift scripts/make-license-key.swift --sign <private-hex> buyer@example.com [machine-uuid] [days]
+```
+
+Keep the private key in the checkout webhook's secrets. It must never enter this repo.
 
 ## How Now Playing works
 
-macOS 15.4 added an entitlement check to `mediaremoted`; unentitled apps get nothing. Alcove's
-answer is an XPC service whose bundle id is `com.apple.controlcenter.TylandHelper` — the check grants
-access to anything under `com.apple.*`.
+macOS 15.4 added an entitlement check to `mediaremoted`: it answers only processes whose code-signing
+identifier begins with `com.apple.`, and unentitled apps get nothing.
 
-This build does the same thing more simply: `Contents/Helpers/TylandHelper` is a plain child process
+`Contents/Helpers/TylandHelper` is a plain child process
 signed with `--identifier com.apple.tyland.mediahelper` (see `build.sh`). It links MediaRemote via
 `dlopen`, streams newline-delimited JSON on stdout, and takes commands on stdin. It exits when its
 stdin closes, so it can never outlive the app.
@@ -116,13 +168,14 @@ two wrongly demoted everyone to AppleScript whenever playback was stopped.
 ## Lock Screen widgets — read before enabling
 
 Uses private CGS Space APIs (`CGSSpaceCreate`, `CGSSpaceSetAbsoluteLevel`, `CGSAddWindowsToSpaces`).
-Alcove's author locked himself out of his Mac four times building this. **Disabled by default.**
+Getting this wrong can leave a window over the login field and lock you out of your own Mac.
+**Disabled by default**, and marked experimental in Settings › Privacy.
 
 Before enabling: log in on a second admin account and confirm SSH from another machine works.
 
 ```bash
-defaults write dev.local.tyland lockScreenEnabled -bool YES   # enable
-defaults write dev.local.tyland lockScreenEnabled -bool NO && pkill -x Tyland   # escape hatch
+defaults write <bundle-id> lockScreenEnabled -bool YES   # enable
+defaults write <bundle-id> lockScreenEnabled -bool NO && pkill -x Tyland   # escape hatch
 ```
 
 Four things had to be exactly right, and getting any of them wrong makes it silently never appear:
@@ -144,12 +197,12 @@ macOS already draws those and duplicating them put the panel straight on top of 
 It sits horizontally centred with its centre **72% down** the screen. Nudge it without rebuilding:
 
 ```bash
-defaults write dev.local.tyland lockScreenPosition -float 0.67   # higher
-defaults write dev.local.tyland lockScreenPosition -float 0.77   # lower
+defaults write <bundle-id> lockScreenPosition -float 0.67   # higher
+defaults write <bundle-id> lockScreenPosition -float 0.77   # lower
 ```
 
 Diagnostic — presents the card without locking, then tears it down:
-`defaults write dev.local.tyland debugPresentLockScreen -bool YES`
+`defaults write <bundle-id> debugPresentLockScreen -bool YES`
 
 ## Permissions
 
@@ -192,7 +245,7 @@ also polled on the fast heartbeat and collapses the island the moment it leaves.
 
 - **Live turn-by-turn navigation.** macOS exposes no way to read Maps' route state. The
   "leave in N minutes" activity delivers the useful half using MapKit.
-- **Alcove's sounds and AirPods videos.** Those are copyrighted assets, not APIs. Sounds are
+- **Third-party sound packs and device videos.** Those are copyrighted assets, not APIs. Sounds are
   synthesised at runtime or drawn from `/System/Library/Sounds`; AirPods use the battery-ring
   treatment the real Dynamic Island shows.
 - **System notification mirroring.** No sanctioned API; the alternatives break every macOS release.
@@ -223,7 +276,7 @@ Everything timed rides one `Heartbeat` (250 ms fast / 2 s slow). Nothing else ma
 five more services each owning one is how a fraction of a percent becomes five.
 
 Diagnostic escape hatch used to find the above:
-`defaults write dev.local.tyland debugSkipServices "media,activities,weather,downloads,routes"`
+`defaults write <bundle-id> debugSkipServices "media,activities,weather,downloads,routes"`
 
 ## Layout
 

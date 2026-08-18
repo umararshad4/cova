@@ -1,0 +1,336 @@
+<title>Tyland</title>
+<meta name="description" content="A Dynamic Island for every Mac — notch or no notch, built-in display or external monitor.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --ground:   #F6F6F4;
+    --surface:  #FFFFFF;
+    --sunk:     #EFEFEC;
+    --line:     #DDDDD8;
+    --line-soft:#E9E9E5;
+    --ink:      #16181C;
+    --ink-2:    #3C4149;
+    --muted:    #6B7280;
+    --faint:    #949AA3;
+    --brass:    #9A6B14;
+    --brass-hi: #B8862B;
+    --pro:      #1F6F66;
+    --notch:    #16181C;
+    --shadow:   0 1px 2px rgba(20,22,26,.05), 0 18px 40px -22px rgba(20,22,26,.28);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:#0D0F12; --surface:#14171B; --sunk:#191D22; --line:#272C33; --line-soft:#1F242A;
+      --ink:#E9EBEE; --ink-2:#C2C7CE; --muted:#8C949E; --faint:#6E767F;
+      --brass:#E3AC46; --brass-hi:#F0C26B; --pro:#55B7A8; --notch:#000000;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 20px 46px -24px rgba(0,0,0,.8);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0D0F12; --surface:#14171B; --sunk:#191D22; --line:#272C33; --line-soft:#1F242A;
+    --ink:#E9EBEE; --ink-2:#C2C7CE; --muted:#8C949E; --faint:#6E767F;
+    --brass:#E3AC46; --brass-hi:#F0C26B; --pro:#55B7A8; --notch:#000000;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 20px 46px -24px rgba(0,0,0,.8);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-size: 16px; line-height: 1.62; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 26px 110px; }
+
+  /* hero */
+  .notch-bar { display: flex; justify-content: center; margin-bottom: 54px; }
+  .notch-bar svg { width: 300px; height: 38px; display: block; }
+  .notch-bar path { fill: var(--notch); }
+  .notch-bar circle { fill: var(--brass-hi); }
+  @media (prefers-reduced-motion: no-preference) {
+    .notch-bar circle { animation: blip 4.5s ease-in-out infinite; }
+    @keyframes blip { 0%,72%,100% { opacity:.35 } 80% { opacity:1 } }
+  }
+
+  h1 {
+    font-family: Archivo, sans-serif; font-weight: 700;
+    font-size: clamp(36px, 6.2vw, 64px); line-height: 1.03; letter-spacing: -.03em;
+    margin: 0 0 20px; text-wrap: balance; max-width: 17ch;
+  }
+  .lede {
+    font-size: clamp(17px, 2.2vw, 20px); line-height: 1.55;
+    color: var(--ink-2); max-width: 56ch; margin: 0 0 30px;
+  }
+  .lede strong { color: var(--ink); font-weight: 600; }
+
+  .cta { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin-bottom: 14px; }
+  .btn {
+    display: inline-block; font-family: Archivo, sans-serif; font-weight: 600; font-size: 15px;
+    padding: 13px 26px; border-radius: 7px; text-decoration: none; border: 1px solid transparent;
+  }
+  .btn.primary { background: var(--ink); color: var(--ground); }
+  .btn.primary:hover { background: var(--brass); color: #fff; }
+  .btn.ghost { border-color: var(--line); color: var(--ink); background: var(--surface); }
+  .btn.ghost:hover { border-color: var(--brass); color: var(--brass); }
+  .fineprint { font-size: 13.5px; color: var(--muted); margin: 0 0 66px; }
+
+  section { margin-top: 76px; }
+  h2 {
+    font-family: Archivo, sans-serif; font-weight: 600;
+    font-size: clamp(24px, 3.4vw, 31px); letter-spacing: -.022em; margin: 0 0 10px;
+    text-wrap: balance;
+  }
+  .sec-intro { color: var(--ink-2); max-width: 60ch; margin: 0 0 28px; }
+  p { margin: 0 0 16px; }
+  code {
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .86em;
+    background: var(--sunk); border: 1px solid var(--line-soft);
+    padding: .08em .34em; border-radius: 3px; color: var(--ink-2);
+  }
+
+  /* the claim */
+  .claim {
+    border: 1px solid var(--line); background: var(--surface);
+    border-left: 3px solid var(--brass-hi);
+    padding: 26px 28px; box-shadow: var(--shadow);
+  }
+  .claim h2 { font-size: 21px; margin-bottom: 8px; }
+  .claim p:last-child { margin-bottom: 0; }
+
+  /* feature grid */
+  .grid { display: grid; gap: 1px; grid-template-columns: repeat(auto-fit, minmax(232px,1fr));
+          background: var(--line); border: 1px solid var(--line); }
+  .cell { background: var(--surface); padding: 22px; }
+  .cell h3 {
+    font-family: Archivo, sans-serif; font-weight: 600; font-size: 16px;
+    margin: 0 0 6px; letter-spacing: -.01em;
+  }
+  .cell p { font-size: 14.5px; color: var(--muted); margin: 0; line-height: 1.55; }
+
+  /* pricing */
+  .tiers { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(290px,1fr)); }
+  .tier { border: 1px solid var(--line); background: var(--surface); padding: 26px; }
+  .tier.paid { border-color: var(--brass-hi); box-shadow: var(--shadow); }
+  .tier .label {
+    font-family: "IBM Plex Mono", monospace; font-size: 11px; font-weight: 500;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+  }
+  .price {
+    font-family: Archivo, sans-serif; font-weight: 700; font-size: 42px;
+    letter-spacing: -.03em; margin: 10px 0 2px; font-variant-numeric: tabular-nums;
+  }
+  .tier.paid .price { color: var(--brass); }
+  .price .was {
+    font-size: 19px; font-weight: 500; color: var(--faint);
+    text-decoration: line-through; margin-left: 9px; letter-spacing: -.01em;
+  }
+  .tier .sub { color: var(--muted); font-size: 13.5px; margin: 0 0 18px; }
+  .tier ul { margin: 0 0 20px; padding: 0; list-style: none; }
+  .tier li {
+    padding: 9px 0 9px 22px; border-top: 1px solid var(--line-soft);
+    position: relative; font-size: 14.5px; line-height: 1.5;
+  }
+  .tier li::before { content: "—"; position: absolute; left: 0; color: var(--faint); }
+  .tier.paid li::before { content: "+"; color: var(--brass); font-weight: 600; }
+
+  /* honesty */
+  .honest {
+    border: 1px solid var(--line); background: var(--sunk);
+    padding: 24px 26px; font-size: 14.5px; color: var(--ink-2);
+  }
+  .honest h2 { font-size: 19px; }
+  .honest p:last-child { margin-bottom: 0; }
+
+  footer {
+    margin-top: 84px; padding-top: 22px; border-top: 1px solid var(--line);
+    font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--faint);
+    display: flex; flex-wrap: wrap; gap: 8px 26px;
+  }
+  footer a { color: var(--faint); }
+  a { color: var(--brass); text-underline-offset: 2px; }
+  a:focus-visible, .btn:focus-visible { outline: 2px solid var(--brass); outline-offset: 3px; }
+
+  @media (max-width: 620px) { .wrap { padding: 0 18px 80px; } }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <div class="notch-bar" aria-hidden="true">
+      <svg viewBox="0 0 300 38" xmlns="http://www.w3.org/2000/svg">
+        <path d="M54 0 C62 0, 66 5, 66 12 L66 20 A13 13 0 0 0 79 33 L221 33 A13 13 0 0 0 234 20 L234 12 C234 5, 238 0, 246 0 Z"/>
+        <circle cx="216" cy="17" r="3.8"/>
+      </svg>
+    </div>
+
+    <h1>Your notch, doing something useful.</h1>
+    <p class="lede">
+      Now Playing with real album art. Volume and brightness that stop covering your work. AirPods
+      battery. What's next in your calendar, and when to leave for it. <strong>And it works on Macs
+      that have no notch at all</strong> — every other app in this category simply renders nothing.
+    </p>
+
+    <div class="cta">
+      <a class="btn primary" href="#download">Download free</a>
+      <a class="btn ghost" href="#pricing">See what Pro adds</a>
+    </div>
+    <p class="fineprint">
+      macOS 13 or later · Apple silicon and Intel · free tier has no time limit, no watermark, no nag
+    </p>
+  </header>
+
+  <section>
+    <div class="claim">
+      <h2>The only one that works on every Mac</h2>
+      <p>
+        Every other Dynamic Island app requires a physical notch — a MacBook Pro from late 2021 or
+        newer. If you have a MacBook Air, an older Pro, or a Mac mini, Studio or Pro on an external
+        monitor, they render nothing at all.
+      </p>
+      <p>
+        Tyland uses the real notch when your Mac has one, and draws an identical island when it
+        doesn't. Same features, same behaviour, on the built-in display or a 27-inch monitor.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>What it does</h2>
+    <p class="sec-intro">Everything below is in the free version unless marked otherwise.</p>
+    <div class="grid">
+      <div class="cell">
+        <h3>Now Playing</h3>
+        <p>Album art, a colour wash drawn from it, a scrubber you can drag, and transport controls —
+           for any player, not just Music and Spotify.</p>
+      </div>
+      <div class="cell">
+        <h3>HUDs that don't cover your work</h3>
+        <p>Volume, brightness, keyboard backlight, charging and low battery, in the notch instead of
+           a grey square in the middle of the screen.</p>
+      </div>
+      <div class="cell">
+        <h3>Device battery</h3>
+        <p>AirPods left, right and case levels the moment they connect — read from the system, not
+           guessed.</p>
+      </div>
+      <div class="cell">
+        <h3>Live indicators</h3>
+        <p>Focus, and a light whenever your camera, microphone or screen is being captured — by any
+           app, not just this one.</p>
+      </div>
+      <div class="cell">
+        <h3>Downloads</h3>
+        <p>Real progress with a completion chime, including exact totals from Chromium browsers.</p>
+      </div>
+      <div class="cell">
+        <h3>Gestures, no permissions</h3>
+        <p>Two fingers on the notch to open, close and change track. Tyland never asks for
+           Accessibility or Input Monitoring — it cannot watch what you type.</p>
+      </div>
+      <div class="cell">
+        <h3>Live waveform <em>· Pro</em></h3>
+        <p>A genuine CoreAudio tap of what's actually playing, not a looping animation. Needs
+           macOS 14.4 or later.</p>
+      </div>
+      <div class="cell">
+        <h3>Leave-in time <em>· Pro</em></h3>
+        <p>Travel time to your next event with an address, so the island tells you when to leave.
+           Nobody else in this category does routing.</p>
+      </div>
+      <div class="cell">
+        <h3>Every display <em>· Pro</em></h3>
+        <p>An island on your external monitor, or on all of them at once.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="pricing">
+    <h2>Pricing</h2>
+    <p class="sec-intro">
+      Buy once. No subscription, and no upgrade prompt living in your notch.
+    </p>
+    <div class="tiers">
+      <div class="tier">
+        <p class="label">Tyland</p>
+        <p class="price">Free</p>
+        <p class="sub">Forever. Not a trial.</p>
+        <ul>
+          <li>Now Playing, in full</li>
+          <li>Every HUD</li>
+          <li>AirPods and device battery</li>
+          <li>Focus, camera, mic and recording indicators</li>
+          <li>Downloads from <code>~/Downloads</code></li>
+          <li>Trackpad gestures and sound cues</li>
+          <li>Your built-in display — notch or not</li>
+        </ul>
+        <a class="btn ghost" href="#download">Download</a>
+      </div>
+      <div class="tier paid">
+        <p class="label">Tyland Pro</p>
+        <p class="price">$12<span class="was">$19</span></p>
+        <p class="sub">
+          One-time, for 3 Macs. Launch price for the first 90 days, then $19.<br>
+          7-day full trial · 14-day refund · updates included for 24 months
+        </p>
+        <ul>
+          <li>External monitors, and all-displays mode</li>
+          <li>The live audio waveform</li>
+          <li>Calendar and leave-in time</li>
+          <li>Lock screen widgets</li>
+          <li>Watch any folder for downloads</li>
+          <li>Priority email support</li>
+        </ul>
+        <a class="btn primary" href="#download">Start the 7-day trial</a>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="honest">
+      <h2>Things worth knowing before you pay</h2>
+      <p>
+        <strong>Tyland uses some undocumented Apple interfaces.</strong> Reading what's playing
+        system-wide, and drawing on the lock screen, have no public API on macOS — every app in this
+        category is in the same position. Apple can change them in any update. When that happens
+        Tyland switches the affected feature off rather than misbehaving, and can do so remotely
+        within hours while a fix ships. It is the honest trade for features macOS does not otherwise
+        allow.
+      </p>
+      <p>
+        <strong>Nothing leaves your Mac.</strong> No account, no telemetry, no analytics. Your
+        calendar, your location and your audio are read on-device and never transmitted. The
+        waveform reduces sound to four loudness numbers on the audio thread; it is never recorded.
+      </p>
+      <p>
+        <strong>The live waveform needs macOS 14.4.</strong> Everything else runs on macOS 13 and
+        later. Lock screen widgets are labelled experimental in the app, because they are.
+      </p>
+    </div>
+  </section>
+
+  <section id="download">
+    <h2>Get it</h2>
+    <p class="sec-intro">
+      Signed and notarized by Apple, so it opens with a double-click. Updates itself.
+    </p>
+    <div class="cta">
+      <a class="btn primary" href="#">Download for macOS</a>
+      <a class="btn ghost" href="#">Install with Homebrew</a>
+    </div>
+    <p class="fineprint">
+      Replace both links before launch — the DMG from your GitHub release, and
+      <code>brew install --cask tyland</code>.
+    </p>
+  </section>
+
+  <footer>
+    <span>Tyland</span>
+    <span><a href="#">Privacy</a></span>
+    <span><a href="#">Terms</a></span>
+    <span><a href="#">Refunds</a></span>
+    <span><a href="mailto:support@example.com">support@example.com</a></span>
+  </footer>
+
+</div>
