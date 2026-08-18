@@ -24,7 +24,11 @@ fi
 sha=$(git rev-parse HEAD)
 git push origin main
 
-# The run does not exist the instant the push returns, so wait for the one built from this commit.
+# Releases no longer fire on push — a README typo used to ship a build to every customer, and each
+# one reset their permissions. Ask for the run explicitly.
+gh workflow run release.yml --ref main
+
+# The run does not exist the instant the dispatch returns, so wait for the one built from this commit.
 echo "waiting for the release run…"
 id=""
 for _ in $(seq 1 60); do
