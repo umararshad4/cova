@@ -5,6 +5,13 @@ Every version here has a matching GitHub release with a `Tyland.dmg` attached.
 
 <!-- next -->
 
+## v0.6.0 — 2026-08-22
+
+### Features
+
+- revamp island UI/UX to match Alcove (motion, ambient chip, month calendar, HUD restyle) (885edea)
+
+
 ## v0.5.0 — 2026-08-22
 
 ### Features
