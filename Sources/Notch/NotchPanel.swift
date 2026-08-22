@@ -254,10 +254,11 @@ final class NotchPanel: NSPanel {
     /// Ordering out rather than hiding keeps the panel off the screen-capture and Space lists too.
     func setVisible(_ visible: Bool) {
         if visible {
-            guard !isVisible else { return }
-            // Re-asserted on every show: a window ordered out on one Space can come back belonging
-            // to that Space alone, which is exactly how the island ends up present on one desktop
-            // and missing on the next. Setting it again is free and puts it back on all of them.
+            // Re-asserted on *every* show request, even when AppKit already reports the window
+            // visible. A panel ordered out on one Space can come back belonging to that Space
+            // alone: `isVisible` keeps answering true while the window is missing from every
+            // other desktop, so an early return here latched that state forever. Reasserting
+            // the behavior and re-ordering puts it back on all of them; both are cheap.
             collectionBehavior = Self.everywhere
             orderFrontRegardless()
         } else if isVisible {
