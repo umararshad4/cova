@@ -33,7 +33,7 @@ struct ExpandedView: View {
                 case .nowPlaying:
                     NowPlayingPanel(coordinator: coordinator)
                 case .agenda:
-                    AgendaPanel(events: coordinator.events)
+                    CalendarPanel(events: coordinator.events)
                 case .downloads:
                     DownloadsPanel(progress: coordinator.download)
                 case .empty:
@@ -74,78 +74,6 @@ struct ExpandedView: View {
             .padding(.horizontal, 38)
             .offset(y: coordinator.geometry.collapsedSize.height)
         }
-    }
-}
-
-/// What's next, from the events the calendar service already fetches.
-struct AgendaPanel: View {
-    let events: [CalendarEvent]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text("Up Next")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.5))
-                .textCase(.uppercase)
-                .kerning(0.6)
-
-            ForEach(events.prefix(3)) { event in
-                AgendaRow(event: event)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-struct AgendaRow: View {
-    let event: CalendarEvent
-
-    var body: some View {
-        HStack(spacing: 9) {
-            RoundedRectangle(cornerRadius: 1.5)
-                .fill(tint)
-                .frame(width: 3, height: 26)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(event.title)
-                    .font(.system(size: 12, weight: .medium))
-                    .lineLimit(1)
-                Text(countdown)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(0.55))
-            }
-
-            Spacer(minLength: 4)
-
-            if let meeting = event.meetingURL {
-                Button {
-                    NSWorkspace.shared.open(meeting)
-                } label: {
-                    Text("Join")
-                        .font(.system(size: 10, weight: .semibold))
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 4)
-                        .background(Capsule().fill(Color.accentColor.opacity(0.85)))
-                }
-                .buttonStyle(.plain)
-                .help(meeting.absoluteString)
-            }
-        }
-        .foregroundStyle(.white)
-    }
-
-    private var tint: Color {
-        event.tint.map { Color(cgColor: $0) } ?? .accentColor
-    }
-
-    /// "in 12 min" reads better than a clock time for the thing about to happen.
-    private var countdown: String {
-        if event.isAllDay { return "All day" }
-        let minutes = event.minutesAway
-        if minutes < 0 { return "Now · \(event.subtitle)" }
-        if minutes < 60 { return "in \(minutes) min · \(event.subtitle)" }
-        let hours = Double(minutes) / 60
-        return "in \(hours < 2 ? String(format: "%.1f", hours) : String(Int(hours.rounded()))) h · \(event.subtitle)"
     }
 }
 

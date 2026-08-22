@@ -191,15 +191,34 @@ final class IslandCoordinator: ObservableObject {
         battery?.isCharging == true
     }
 
+    /// Alcove's idle state: the notch is never empty when the calendar knows something. The next
+    /// upcoming event's title sits beside the bare notch until an activity claims the island.
+    var ambientEventTitle: String? {
+        guard current == nil, !isExpanded else { return nil }
+        return events
+            .filter { $0.minutesAway >= 0 }
+            .min { $0.start < $1.start }?
+            .title
+    }
+
+    /// Width reserved left of the notch for that chip. Zero keeps the island exactly the notch,
+    /// so a calendar-less machine behaves exactly as before.
+    static let ambientChipWidth: CGFloat = 96
+
+    var ambientChipVisible: Bool { ambientEventTitle != nil }
+
     var currentSize: CGSize {
         if isExpanded { return Self.expandedSize }
         // The physical notch stays centred, so a right-side accessory needs matching clear space
         // on the left; otherwise half the icon lands behind the camera housing.
         let chargingWidth = showsChargingAccessory ? Self.chargingAccessorySideWidth * 2 : 0
+        let ambientWidth: CGFloat = ambientChipVisible ? Self.ambientChipWidth : 0
         guard let current else {
             return CGSize(
-                width: geometry.collapsedSize.width + chargingWidth,
-                height: chargingWidth > 0 ? geometry.collapsedSize.height + 2 : geometry.collapsedSize.height
+                width: geometry.collapsedSize.width + chargingWidth + ambientWidth,
+                height: chargingWidth > 0 || ambientWidth > 0
+                    ? geometry.collapsedSize.height + 2
+                    : geometry.collapsedSize.height
             )
         }
         let sides = current.sideWidths

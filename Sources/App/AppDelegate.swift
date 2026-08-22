@@ -168,6 +168,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 coordinator.expandOnHover = false
                 coordinator.toggle()
             }
+            // Design affordance: seeds sample calendar events so the ambient chip and the
+            // expanded calendar render without granting EventKit access.
+            //   defaults write <bundle-id> debugDemoEvents -bool YES
+            if UserDefaults.standard.bool(forKey: "debugDemoEvents") {
+                coordinator.events = CalendarPanel.demoEvents
+            }
             let panel = NotchPanel(coordinator: coordinator, screen: screen)
             // `hideFromScreenCapture`: keeps the island out of screenshots and shares.
             panel.sharingType = self.settings.hideFromScreenCapture ? .none : .readOnly
@@ -283,7 +289,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         calendar.onChange = { [weak self] events in
             guard let self else { return }
-            self.islands.each { $0.events = events }
+            // The debug seed must survive the first real fetch, which fires after launch and
+            // would otherwise overwrite it with an empty list on a machine with no calendar.
+            let seeded = UserDefaults.standard.bool(forKey: "debugDemoEvents")
+                ? CalendarPanel.demoEvents : events
+            self.islands.each { $0.events = seeded }
             self.routes.upcomingEvents = events
         }
 

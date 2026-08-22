@@ -37,31 +37,22 @@ struct Waveform: View {
     }
 }
 
-/// The 16-segment level readout macOS uses for volume and brightness. Also a Canvas — sixteen
-/// shapes in a `ForEach` is the same trap as the waveform.
+/// Alcove's HUD readout: one continuous capsule filling over a dim track, not macOS's segments.
 struct LevelBar: View {
     let value: Float
-    var segments: Int = 16
-    var height: CGFloat = 11
-
-    private let segmentWidth: CGFloat = 3
-    private let spacing: CGFloat = 2
+    var height: CGFloat = 5
 
     var body: some View {
-        Canvas(opaque: false, rendersAsynchronously: false) { context, size in
-            let filled = Int((Double(value) * Double(segments)).rounded())
-            let totalWidth = CGFloat(segments) * segmentWidth + CGFloat(segments - 1) * spacing
-            var x = (size.width - totalWidth) / 2
-
-            for index in 0..<segments {
-                let rect = CGRect(x: x, y: 0, width: segmentWidth, height: size.height)
-                context.fill(
-                    Path(roundedRect: rect, cornerRadius: 1),
-                    with: .color(index < filled ? .white : .white.opacity(0.22))
-                )
-                x += segmentWidth + spacing
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.white.opacity(0.22))
+                Capsule()
+                    .fill(.white)
+                    .frame(width: max(0, geo.size.width * Double(min(max(value, 0), 1))))
             }
         }
         .frame(height: height)
+        .animation(.easeOut(duration: 0.12), value: value)
     }
 }

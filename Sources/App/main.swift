@@ -8,6 +8,13 @@ if CommandLine.arguments.contains("--self-test") {
     exit(0)
 }
 
+// Design harness: render the island's states to PNGs and exit. See `renderUIStates(to:)`.
+if let dirIndex = CommandLine.arguments.firstIndex(of: "--render-ui"),
+   CommandLine.arguments.count > dirIndex + 1 {
+    MainActor.assumeIsolated { renderUIStates(to: CommandLine.arguments[dirIndex + 1]) }
+    exit(0)
+}
+
 // Two copies running at once — the one still in ~/Downloads and the one in /Applications — each
 // build a panel, each spawn a com.apple.tyland.mediahelper child, and both contend for the
 // lock-screen CGS space. An in-place updater makes a double launch more likely, not less.

@@ -3,7 +3,14 @@ import SwiftUI
 struct IslandView: View {
     @ObservedObject var coordinator: IslandCoordinator
 
-    private var expansionAnimation: Animation { .spring(response: 0.38, dampingFraction: 0.78) }
+    /// Alcove's feel: opening is a quick spring with a soft settle; closing is faster and drier.
+    /// One animation per direction — `.animation(_:value:)` takes whatever is current when the
+    /// token flips, so switching on `isExpanded` here is enough.
+    private var expansionAnimation: Animation {
+        coordinator.isExpanded
+            ? .spring(response: 0.42, dampingFraction: 0.82)
+            : .spring(response: 0.32, dampingFraction: 0.9)
+    }
 
     var body: some View {
         let size = coordinator.currentSize
@@ -22,16 +29,17 @@ struct IslandView: View {
     }
 
     private func island(size: CGSize) -> some View {
+        // Alcove's expanded card is noticeably rounder than the resting notch: 14 top, 28 bottom.
         NotchShape(
-            topRadius: coordinator.isExpanded ? 13 : 8,
-            bottomRadius: coordinator.isExpanded ? 24 : 11
+            topRadius: coordinator.isExpanded ? 14 : 8,
+            bottomRadius: coordinator.isExpanded ? 28 : 11
         )
         .fill(.black)
         .frame(width: size.width, height: size.height)
         .overlay(alignment: .top) { content(size: size) }
         .clipShape(NotchShape(
-            topRadius: coordinator.isExpanded ? 13 : 8,
-            bottomRadius: coordinator.isExpanded ? 24 : 11
+            topRadius: coordinator.isExpanded ? 14 : 8,
+            bottomRadius: coordinator.isExpanded ? 28 : 11
         ))
     }
 
@@ -51,7 +59,15 @@ struct IslandView: View {
         } else if let activity = coordinator.current {
             CompactActivityView(activity: activity, coordinator: coordinator)
                 .frame(width: size.width, height: coordinator.geometry.collapsedSize.height)
-                .transition(.opacity)
+                // Alcove's mini-cards pop: slight scale-up from behind the notch, not a bare fade.
+                .transition(.opacity.combined(with: .scale(scale: 0.92)))
+        } else if coordinator.ambientChipVisible {
+            AmbientIdleView(
+                title: coordinator.ambientEventTitle ?? "",
+                notchWidth: coordinator.geometry.collapsedSize.width
+            )
+            .frame(width: size.width, height: coordinator.geometry.collapsedSize.height)
+            .transition(.opacity.combined(with: .scale(scale: 0.92)))
         } else if coordinator.showsChargingAccessory {
             HStack(spacing: 0) {
                 Color.clear.frame(width: IslandCoordinator.chargingAccessorySideWidth)
@@ -62,6 +78,34 @@ struct IslandView: View {
             .frame(width: size.width, height: coordinator.geometry.collapsedSize.height)
             .transition(.opacity.combined(with: .scale(scale: 0.8, anchor: .trailing)))
         }
+    }
+}
+
+/// The bare-notch ambient chip: the next event's title, dimmed, left of the physical notch.
+struct AmbientIdleView: View {
+    let title: String
+    let notchWidth: CGFloat
+
+    var body: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 5) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.4))
+                Text(title)
+                    .font(.system(size: 10, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+            .frame(width: IslandCoordinator.ambientChipWidth - 8, alignment: .trailing)
+            .padding(.leading, 6)
+
+            Spacer(minLength: 0)
+                .frame(width: notchWidth)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Next event: \(title)")
     }
 }
 
@@ -166,9 +210,11 @@ struct CompactActivityView: View {
     private var trailing: some View {
         switch activity {
         case .volume(let level, let muted):
-            LevelBar(value: muted ? 0 : level)
-        case .brightness(let level), .keyboardBacklight(let level):
-            LevelBar(value: level)
+            HUDLabel(name: "Sound") { LevelBar(value: muted ? 0 : level) }
+        case .brightness(let level):
+            HUDLabel(name: "Brightness") { LevelBar(value: level) }
+        case .keyboardBacklight(let level):
+            HUDLabel(name: "Keyboard") { LevelBar(value: level) }
         case .power(let event):
             Text(powerLabel(event))
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
@@ -207,29 +253,45 @@ struct CompactActivityView: View {
             .foregroundStyle(tint)
             .symbolReplaceTransition()
     }
+}
 
-    private func powerSymbol(_ event: PowerEvent) -> String {
-        switch event {
-        case .pluggedIn, .fullyCharged: return "battery.100percent.bolt"
-        case .unplugged: return "battery.75percent"
-        case .lowBattery: return "battery.25percent"
+/// Alcove's HUD pill: the control's name sits between the icon and the level bar.
+struct HUDLabel<Bar: View>: View {
+    let name: String
+    @ViewBuilder let bar: () -> Bar
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Text(name)
+                .font(.system(size: 10, weight: .medium))
+                .lineLimit(1)
+            bar()
+                .frame(maxWidth: .infinity)
         }
     }
+}
 
-    private func powerTint(_ event: PowerEvent) -> Color {
-        switch event {
-        case .pluggedIn: return ChargingBolt.purple
-        case .fullyCharged: return .green
-        case .lowBattery: return .red
-        case .unplugged: return .white
-        }
+private func powerSymbol(_ event: PowerEvent) -> String {
+    switch event {
+    case .pluggedIn, .fullyCharged: return "battery.100percent.bolt"
+    case .unplugged: return "battery.75percent"
+    case .lowBattery: return "battery.25percent"
     }
+}
 
-    private func powerLabel(_ event: PowerEvent) -> String {
-        switch event {
-        case .pluggedIn(let p), .unplugged(let p), .lowBattery(let p): return "\(p)%"
-        case .fullyCharged: return "Full"
-        }
+private func powerTint(_ event: PowerEvent) -> Color {
+    switch event {
+    case .pluggedIn: return ChargingBolt.purple
+    case .fullyCharged: return .green
+    case .lowBattery: return .red
+    case .unplugged: return .white
+    }
+}
+
+private func powerLabel(_ event: PowerEvent) -> String {
+    switch event {
+    case .pluggedIn(let p), .unplugged(let p), .lowBattery(let p): return "\(p)%"
+    case .fullyCharged: return "Full"
     }
 }
 

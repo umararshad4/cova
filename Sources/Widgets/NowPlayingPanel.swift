@@ -94,7 +94,11 @@ struct Scrubber: View {
     private var active: Bool { hovering || dragFraction != nil }
 
     var body: some View {
-        VStack(spacing: 3) {
+        // Alcove puts the times on the scrubber's own row rather than beneath it.
+        HStack(spacing: 8) {
+            Text(Self.time(elapsed))
+                .frame(minWidth: 26, alignment: .leading)
+
             GeometryReader { geo in
                 ScrubberBar(
                     width: geo.size.width,
@@ -125,15 +129,12 @@ struct Scrubber: View {
             .animation(.easeOut(duration: 0.15), value: active)
             .onHover { hovering = $0 }
 
-            HStack {
-                Text(Self.time(elapsed))
-                Spacer(minLength: 0)
-                Text(duration > 0 ? "-" + Self.time(max(duration - elapsed, 0)) : "")
-            }
-            .font(.system(size: 9, weight: .medium, design: .rounded))
-            .monospacedDigit()
-            .foregroundStyle(.white.opacity(0.45))
+            Text(duration > 0 ? "-" + Self.time(max(duration - elapsed, 0)) : "")
+                .frame(minWidth: 30, alignment: .trailing)
         }
+        .font(.system(size: 10, weight: .medium, design: .rounded))
+        .monospacedDigit()
+        .foregroundStyle(.white.opacity(0.45))
     }
 
     static func time(_ seconds: Double) -> String {
