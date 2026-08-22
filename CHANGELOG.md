@@ -5,6 +5,18 @@ Every version here has a matching GitHub release with a `Tyland.dmg` attached.
 
 <!-- next -->
 
+## v0.5.0 — 2026-08-22
+
+### Features
+
+- make Tyland sellable — stability, real settings, licensing, signed builds (17f4ef7)
+
+### Fixes
+
+- re-assert all-Spaces behavior on every show so the notch cannot stay pinned to one desktop (a664a87)
+- dispatch the release run instead of waiting for one that never starts (b5e84cc)
+
+
 ## v0.4.2 — 2026-08-17
 
 ### Fixes
